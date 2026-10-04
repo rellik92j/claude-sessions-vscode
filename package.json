@@ -1,0 +1,307 @@
+{
+  "name": "claude-sessions",
+  "displayName": "Claude Sessions",
+  "description": "Browse, search, read and resume all of your Claude Code sessions from the VS Code sidebar.",
+  "version": "0.2.1",
+  "publisher": "local",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "claudeSessions",
+          "title": "Claude Sessions",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "claudeSessions": [
+        {
+          "type": "webview",
+          "id": "claudeSessions.list",
+          "name": "Sessions"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "claudeSessions.refresh",
+        "title": "Refresh",
+        "category": "Claude Sessions",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "claudeSessions.search",
+        "title": "Search Sessions…",
+        "category": "Claude Sessions",
+        "icon": "$(search)"
+      },
+      {
+        "command": "claudeSessions.groupByProject",
+        "title": "Group by Project",
+        "category": "Claude Sessions",
+        "icon": "$(folder)"
+      },
+      {
+        "command": "claudeSessions.groupByDate",
+        "title": "Group by Date",
+        "category": "Claude Sessions",
+        "icon": "$(calendar)"
+      },
+      {
+        "command": "claudeSessions.showCurrentWorkspaceOnly",
+        "title": "Show Only Current Workspace",
+        "category": "Claude Sessions",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "claudeSessions.showAll",
+        "title": "Show All Projects",
+        "category": "Claude Sessions",
+        "icon": "$(filter-filled)"
+      },
+      {
+        "command": "claudeSessions.resume",
+        "title": "Resume in Claude Code Terminal",
+        "category": "Claude Sessions",
+        "icon": "$(play)"
+      },
+      {
+        "command": "claudeSessions.openInClaudeCode",
+        "title": "Open in Claude Code Chat",
+        "category": "Claude Sessions",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "claudeSessions.openTranscript",
+        "title": "Open Transcript",
+        "category": "Claude Sessions",
+        "icon": "$(book)"
+      },
+      {
+        "command": "claudeSessions.openRawFile",
+        "title": "Open Raw JSONL",
+        "category": "Claude Sessions"
+      },
+      {
+        "command": "claudeSessions.copyId",
+        "title": "Copy Session ID",
+        "category": "Claude Sessions"
+      },
+      {
+        "command": "claudeSessions.copyResumeCommand",
+        "title": "Copy Resume Command",
+        "category": "Claude Sessions"
+      },
+      {
+        "command": "claudeSessions.openPr",
+        "title": "Open Pull Request",
+        "category": "Claude Sessions",
+        "icon": "$(git-pull-request)"
+      },
+      {
+        "command": "claudeSessions.revealFolder",
+        "title": "Open Project Folder in New Window",
+        "category": "Claude Sessions"
+      },
+      {
+        "command": "claudeSessions.focusSearch",
+        "title": "Focus Session Search",
+        "category": "Claude Sessions",
+        "icon": "$(search)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "claudeSessions.focusSearch",
+          "when": "view == claudeSessions.list",
+          "group": "navigation@1"
+        },
+        {
+          "command": "claudeSessions.refresh",
+          "when": "view == claudeSessions.list",
+          "group": "navigation@2"
+        },
+        {
+          "command": "claudeSessions.groupByProject",
+          "when": "view == claudeSessions.list",
+          "group": "1_group@1"
+        },
+        {
+          "command": "claudeSessions.groupByDate",
+          "when": "view == claudeSessions.list",
+          "group": "1_group@2"
+        },
+        {
+          "command": "claudeSessions.showCurrentWorkspaceOnly",
+          "when": "view == claudeSessions.list",
+          "group": "2_filter@1"
+        },
+        {
+          "command": "claudeSessions.showAll",
+          "when": "view == claudeSessions.list",
+          "group": "2_filter@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "claudeSessions.resume",
+          "when": "false"
+        },
+        {
+          "command": "claudeSessions.openTranscript",
+          "when": "false"
+        },
+        {
+          "command": "claudeSessions.openRawFile",
+          "when": "false"
+        },
+        {
+          "command": "claudeSessions.copyId",
+          "when": "false"
+        },
+        {
+          "command": "claudeSessions.copyResumeCommand",
+          "when": "false"
+        },
+        {
+          "command": "claudeSessions.openPr",
+          "when": "false"
+        },
+        {
+          "command": "claudeSessions.revealFolder",
+          "when": "false"
+        },
+        {
+          "command": "claudeSessions.openInClaudeCode",
+          "when": "false"
+        }
+      ],
+      "webview/context": [
+        {
+          "command": "claudeSessions.resume",
+          "when": "webviewId == 'claudeSessions.list' && webviewSection == 'session'",
+          "group": "1_main@1"
+        },
+        {
+          "command": "claudeSessions.openInClaudeCode",
+          "when": "webviewId == 'claudeSessions.list' && webviewSection == 'session' && claudeSessions.hasClaudeCode",
+          "group": "1_main@2"
+        },
+        {
+          "command": "claudeSessions.openTranscript",
+          "when": "webviewId == 'claudeSessions.list' && webviewSection == 'session'",
+          "group": "1_main@3"
+        },
+        {
+          "command": "claudeSessions.openPr",
+          "when": "webviewId == 'claudeSessions.list' && webviewSection == 'session' && sessionHasPr",
+          "group": "1_main@4"
+        },
+        {
+          "command": "claudeSessions.openRawFile",
+          "when": "webviewId == 'claudeSessions.list' && webviewSection == 'session'",
+          "group": "2_other@1"
+        },
+        {
+          "command": "claudeSessions.copyId",
+          "when": "webviewId == 'claudeSessions.list' && webviewSection == 'session'",
+          "group": "3_copy@1"
+        },
+        {
+          "command": "claudeSessions.copyResumeCommand",
+          "when": "webviewId == 'claudeSessions.list' && webviewSection == 'session'",
+          "group": "3_copy@2"
+        },
+        {
+          "command": "claudeSessions.revealFolder",
+          "when": "webviewId == 'claudeSessions.list' && webviewSection == 'project'",
+          "group": "1_main@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Claude Sessions",
+      "properties": {
+        "claudeSessions.projectsDir": {
+          "type": "string",
+          "default": "",
+          "description": "Folder containing Claude Code session logs. Empty = $CLAUDE_CONFIG_DIR/projects or ~/.claude/projects."
+        },
+        "claudeSessions.groupBy": {
+          "type": "string",
+          "enum": [
+            "project",
+            "date"
+          ],
+          "default": "project",
+          "description": "How sessions are grouped in the sidebar."
+        },
+        "claudeSessions.currentWorkspaceOnly": {
+          "type": "boolean",
+          "default": false,
+          "description": "Only show sessions started inside the currently open workspace folders."
+        },
+        "claudeSessions.claudeCommand": {
+          "type": "string",
+          "default": "claude",
+          "description": "Command used to launch Claude Code when resuming a session."
+        },
+        "claudeSessions.terminalLocation": {
+          "type": "string",
+          "enum": [
+            "editor",
+            "panel"
+          ],
+          "enumDescriptions": [
+            "Open as a tab in the editor area, like Claude Code: Open in Terminal",
+            "Open in the bottom terminal panel"
+          ],
+          "default": "editor",
+          "description": "Where Resume opens the Claude Code CLI terminal."
+        },
+        "claudeSessions.showThinking": {
+          "type": "boolean",
+          "default": false,
+          "description": "Include Claude's thinking blocks in the transcript view."
+        },
+        "claudeSessions.hideEmptySessions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Hide sessions that contain no prompts or replies."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p .",
+    "test": "npm run compile && npm run bundle && node --test test/*.test.js",
+    "package": "npm run compile && npm run bundle && vsce package --allow-missing-repository",
+    "bundle": "esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node20 --external:vscode --outfile=dist/extension.js",
+    "vscode:prepublish": "npm run bundle"
+  },
+  "devDependencies": {
+    "@types/markdown-it": "^14.2.0",
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.5.0"
+  },
+  "dependencies": {
+    "@vscode/codicons": "^0.0.46-24",
+    "highlight.js": "^11.12.0",
+    "markdown-it": "^15.0.2"
+  }
+}

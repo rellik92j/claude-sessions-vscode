@@ -1,0 +1,16 @@
+# Everything the extension needs at runtime is bundled into dist/extension.js by esbuild,
+# except the codicon font, which the webviews load as a file.
+src/**
+test/**
+out/**
+**/*.map
+**/*.ts
+tsconfig.json
+.vscode/**
+.gitignore
+*.vsix
+node_modules/**
+!node_modules/@vscode/codicons/package.json
+!node_modules/@vscode/codicons/LICENSE
+!node_modules/@vscode/codicons/dist/codicon.css
+!node_modules/@vscode/codicons/dist/codicon.ttf
