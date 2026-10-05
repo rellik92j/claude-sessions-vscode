@@ -317,6 +317,13 @@ time {
   word-break: break-word;
 }
 
+.excerpt.transcript-match .codicon {
+  font-size: 11px;
+  margin-right: 4px;
+  vertical-align: -1px;
+  opacity: 0.8;
+}
+
 .meta { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
 .tag {
   display: inline-flex;

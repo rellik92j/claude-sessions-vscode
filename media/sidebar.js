@@ -6,6 +6,8 @@
   const collapsed = saved.collapsed || {};
   let query = saved.query || '';
   let state = null;
+  /** Transcript matches from the extension for the token string `key`: session id -> { found, snippet }. */
+  let search = { key: '', hits: {} };
 
   const LIVE_MS = 3 * 60 * 1000;
 
@@ -14,7 +16,7 @@
     <header class="toolbar">
       <label class="search">
         <i class="codicon codicon-search"></i>
-        <input id="q" type="text" placeholder="Search sessions" spellcheck="false" aria-label="Search sessions" />
+        <input id="q" type="text" placeholder="Search sessions and transcripts" spellcheck="false" aria-label="Search sessions and transcripts" />
         <button class="icon-btn clear" id="clear" title="Clear (Esc)" aria-label="Clear search"><i class="codicon codicon-close"></i></button>
       </label>
       <div class="controls">
@@ -80,14 +82,36 @@
     return s.toUpperCase();
   }
 
-  function matches(s, toks) {
-    if (!toks.length) return true;
-    const hay = [s.title, s.excerpt, s.project, s.branch, s.agent, s.model, s.prNumber && `#${s.prNumber}`]
+  function haystack(s) {
+    return [s.title, s.excerpt, s.project, s.branch, s.agent, s.model, s.prNumber && `#${s.prNumber}`]
       .filter(Boolean)
       .join(' ')
       .toLowerCase();
-    return toks.every((t) => hay.includes(t));
   }
+
+  /** Transcript hit for a session, if the results are for the current query. */
+  function transcriptHit(s, toks) {
+    return search.key === toks.join(' ') ? search.hits[s.id] : undefined;
+  }
+
+  // Each word must appear somewhere: on the card or in the transcript.
+  function matches(s, toks) {
+    if (!toks.length) return true;
+    const hay = haystack(s);
+    const hit = transcriptHit(s, toks);
+    return toks.every((t) => hay.includes(t) || (hit && hit.found.includes(t)));
+  }
+
+  /** Asks the extension to search transcripts for the current query. */
+  function requestSearch() {
+    const toks = tokens();
+    if (toks.length) vscode.postMessage({ type: 'search', key: toks.join(' '), tokens: toks });
+  }
+
+  const searchPending = () => {
+    const key = tokens().join(' ');
+    return !!key && search.key !== key;
+  };
 
   const DATE_ICONS = { Today: 'calendar', Yesterday: 'history', 'Previous 7 Days': 'history', 'Previous 30 Days': 'history', Older: 'archive' };
 
@@ -117,7 +141,7 @@
           <div class="title">${hl(s.title, toks)}</div>
           <time data-t="${s.lastTime}" title="${esc(fullDate(s.lastTime))}">${relative(s.lastTime, now)}</time>
         </div>
-        ${s.excerpt ? `<div class="excerpt">${hl(s.excerpt, toks)}</div>` : ''}
+        ${excerptHtml(s, toks)}
         <div class="meta">${meta}</div>
         <div class="card-actions">
           <button class="icon-btn accent" data-action="resume" title="Resume in Claude Code terminal (Ctrl+Enter)"><i class="codicon codicon-play"></i></button>
@@ -126,6 +150,18 @@
           <button class="icon-btn" data-action="copyId" title="Copy session ID"><i class="codicon codicon-copy"></i></button>
         </div>
       </div>`;
+  }
+
+  // When the card itself doesn't explain the match, show where the transcript matched instead of the latest prompt.
+  function excerptHtml(s, toks) {
+    const hit = transcriptHit(s, toks);
+    if (hit?.snippet) {
+      const hay = haystack(s);
+      if (!toks.every((t) => hay.includes(t))) {
+        return `<div class="excerpt transcript-match" title="Found in the transcript"><i class="codicon codicon-quote"></i>${hl(hit.snippet, toks)}</div>`;
+      }
+    }
+    return s.excerpt ? `<div class="excerpt">${hl(s.excerpt, toks)}</div>` : '';
   }
 
   function renderGroup(g, toks, now) {
@@ -203,6 +239,9 @@
         'No sessions yet',
         'Run claude in a terminal and your sessions will show up here automatically.',
       );
+    } else if (!html && searchPending()) {
+      // Transcript results are on their way; avoid flashing "No matches".
+      $list.innerHTML = '';
     } else if (!html) {
       $list.innerHTML = emptyState('search', 'No matches', `Nothing matches “${query}”. Try fewer words.`);
     } else {
@@ -242,7 +281,8 @@
 
   // ---------- events ----------
 
-  const run = (command, id) => vscode.postMessage({ type: 'run', command, id });
+  const run = (command, id) =>
+    vscode.postMessage({ type: 'run', command, id, highlight: command === 'openTranscript' ? tokens() : undefined });
 
   $list.addEventListener('click', (e) => {
     const action = e.target.closest('[data-action]');
@@ -310,6 +350,7 @@
     searchTimer = setTimeout(() => {
       query = $q.value;
       save();
+      requestSearch();
       render();
     }, 60);
   });
@@ -369,6 +410,8 @@
       // Keep keyboard focus on the same card across re-renders.
       const focusedId = document.activeElement?.closest?.('.card')?.dataset.id;
       state = msg;
+      // Sessions may have changed; refresh transcript matches (the previous ones stay shown meanwhile).
+      requestSearch();
       render();
       if (focusedId) {
         const el = $list.querySelector(`.card[data-id="${CSS.escape(focusedId)}"]`);
@@ -377,6 +420,11 @@
           el.tabIndex = 0;
           el.focus({ preventScroll: true });
         }
+      }
+    } else if (msg?.type === 'searchResults') {
+      if (msg.key === tokens().join(' ')) {
+        search = { key: msg.key, hits: msg.hits || {} };
+        render();
       }
     } else if (msg?.type === 'focusSearch') {
       $q.focus();

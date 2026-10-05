@@ -150,7 +150,8 @@ export class SidebarView implements vscode.WebviewViewProvider {
         const command = PAGE_COMMANDS[msg.command];
         const session = typeof msg.id === 'string' ? this.model.find(msg.id) : undefined;
         if (command && session) {
-          vscode.commands.executeCommand(command, session);
+          // openTranscript also gets the current search words to highlight.
+          vscode.commands.executeCommand(command, session, ...(msg.command === 'openTranscript' ? [msg.highlight] : []));
         }
         break;
       }
@@ -165,6 +166,12 @@ export class SidebarView implements vscode.WebviewViewProvider {
       case 'refresh':
         this.model.reload();
         break;
+      case 'search': {
+        // Transcript text stays in the extension host; the webview gets back only which tokens hit and a snippet.
+        const tokens = Array.isArray(msg.tokens) ? msg.tokens.filter((t: unknown): t is string => typeof t === 'string' && !!t) : [];
+        this.view?.webview.postMessage({ type: 'searchResults', key: msg.key, hits: this.model.searchTranscripts(tokens) });
+        break;
+      }
     }
   }
 

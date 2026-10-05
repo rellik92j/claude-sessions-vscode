@@ -442,6 +442,40 @@ body.hide-tools .tool-group { display: none; }
 .fab.visible { opacity: 1; transform: none; pointer-events: auto; }
 .fab:hover { background: var(--subtle-2); }
 
+/* ---------- search highlights ---------- */
+
+mark.hit {
+  background: var(--vscode-editor-findMatchHighlightBackground, rgba(234, 92, 0, 0.33));
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+mark.hit.current {
+  background: var(--vscode-editor-findMatchBackground, rgba(81, 92, 106, 0.8));
+  outline: 1px solid var(--vscode-editor-findMatchBorder, transparent);
+}
+
+.findbar {
+  position: fixed;
+  top: 52px;
+  right: 24px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: calc(100vw - 48px);
+  padding: 3px 4px 3px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--hairline);
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  box-shadow: 0 4px 14px -4px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.5));
+  font-size: 12px;
+}
+.findbar > .codicon { color: var(--muted); }
+.find-query { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+.find-count { color: var(--muted); white-space: nowrap; margin-right: 4px; }
+.findbar .icon-btn { width: 24px; height: 24px; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }

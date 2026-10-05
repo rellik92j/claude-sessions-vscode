@@ -12,13 +12,17 @@ type ToolPart = Extract<TranscriptPart, { kind: 'tool_use' }>;
 /** One webview per session; re-opening a session focuses its existing panel. */
 export class TranscriptPanels {
   private readonly panels = new Map<string, vscode.WebviewPanel>();
+  /** Search words to highlight per session, from the search that opened it. */
+  private readonly highlights = new Map<string, string[]>();
 
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly hasClaudeCode: () => boolean,
   ) {}
 
-  async open(session: SessionInfo): Promise<void> {
+  /** Opens the transcript; `highlight` words are marked and the page opens at the first match. */
+  async open(session: SessionInfo, highlight: string[] = []): Promise<void> {
+    this.highlights.set(session.id, highlight);
     const existing = this.panels.get(session.id);
     if (existing) {
       existing.reveal();
@@ -36,7 +40,10 @@ export class TranscriptPanels {
       ? vscode.Uri.joinPath(claudeCode.extensionUri, 'resources', 'claude-logo.svg')
       : new vscode.ThemeIcon('comment-discussion');
     this.panels.set(session.id, panel);
-    panel.onDidDispose(() => this.panels.delete(session.id));
+    panel.onDidDispose(() => {
+      this.panels.delete(session.id);
+      this.highlights.delete(session.id);
+    });
     panel.webview.onDidReceiveMessage(async (msg) => {
       switch (msg?.command) {
         case 'resume':
@@ -81,6 +88,7 @@ export class TranscriptPanels {
     panel.title = session.title;
     webview.html = buildHtml(session, entries, {
       showThinking,
+      highlight: this.highlights.get(session.id) ?? [],
       hasClaudeCode: this.hasClaudeCode(),
       cspSource: webview.cspSource,
       codiconCss: webview.asWebviewUri(vscode.Uri.joinPath(this.codiconsUri, 'codicon.css')).toString(),
@@ -92,6 +100,8 @@ export class TranscriptPanels {
 
 interface HtmlOptions {
   showThinking: boolean;
+  /** Search words for transcript.js to mark. */
+  highlight?: string[];
   hasClaudeCode: boolean;
   cspSource: string;
   codiconCss: string;
@@ -313,7 +323,7 @@ export function buildHtml(session: SessionInfo, entries: TranscriptEntry[], o: H
 <link rel="stylesheet" href="${o.css}">
 <title>${escapeHtml(session.title)}</title>
 </head>
-<body>
+<body${o.highlight?.length ? ` data-highlight="${escapeHtml(JSON.stringify(o.highlight))}"` : ''}>
 <nav class="topbar">
   <div class="topbar-title"><span class="claude-dot">${CLAUDE_MARK}</span><span>${escapeHtml(session.title)}</span></div>
   <div class="topbar-actions">

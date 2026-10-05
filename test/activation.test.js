@@ -122,6 +122,20 @@ test('bundled extension activates, fills the sidebar, and renders a transcript',
     const html = state.panels[0]?.webview.html ?? '';
     assert.match(html, /<strong>dark mode<\/strong>/);
     assert.match(html, /hljs-keyword/);
+    assert.doesNotMatch(html, /data-highlight/);
+
+    // Transcript search: the sidebar asks, the host answers with matched words and a snippet.
+    handler({ type: 'search', key: 'const toggle', tokens: ['const', 'toggle', 'nowhere'] });
+    const results = posted.filter((m) => m.type === 'searchResults').pop();
+    assert.equal(results.key, 'const toggle');
+    assert.deepEqual(results.hits['aaaa-1111'].found, ['const', 'toggle']);
+    assert.match(results.hits['aaaa-1111'].snippet, /dark mode\*\* toggle/);
+
+    // Opening from a search passes the words on to the transcript page.
+    handler({ type: 'run', command: 'openTranscript', id: 'aaaa-1111', highlight: ['const', 42] });
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(state.panels.length, 1, 'existing panel reused');
+    assert.match(state.panels[0].webview.html, /<body data-highlight="\[&quot;const&quot;\]">/);
     assert.deepEqual(state.errors, []);
 
     // Assets referenced by the webviews must exist on disk.

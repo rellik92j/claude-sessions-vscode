@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { parseSession, parseTranscript, classifyUserContent, decodeProjectDir, oneLine } = require('../out/sessionParser');
+const { parseSession, parseTranscript, classifyUserContent, decodeProjectDir, oneLine, matchText } = require('../out/sessionParser');
 const { formatRelative, dateBucket, isInside, normalizePath, escapeHtml } = require('../out/format');
 const { renderMarkdown } = require('../out/markdown');
 
@@ -77,6 +77,41 @@ test('agent-team sessions: peer messages counted, title disambiguated, shown in 
   assert.equal(parseSession(jsonl(peer), 'f', 'p', 'id').title, 'Overseer: Research the auth flow');
   // A custom title that differs from the agent name is kept verbatim.
   assert.equal(parseSession(jsonl(peer, { type: 'agent-name', agentName: 'A' }, { type: 'custom-title', customTitle: 'Mine' }), 'f', 'p', 'id').title, 'Mine');
+});
+
+test('searchText holds prompts, peer messages and replies but not tool I/O or thinking', () => {
+  const s = parseSession(
+    jsonl(
+      user('<system-reminder>secret reminder</system-reminder>Find the flaky test'),
+      asst('m1', [{ type: 'thinking', thinking: 'private musing' }]),
+      asst('m1', [{ type: 'tool_use', id: 't1', name: 'Grep', input: { pattern: 'toolinput' } }]),
+      user([{ type: 'tool_result', tool_use_id: 't1', content: 'tooloutput' }]),
+      asst('m2', [{ type: 'text', text: 'The culprit is a race in setup.' }]),
+      user('<cross-session-message from-name="Lead">Peer note here</cross-session-message>', { isMeta: true }),
+      user('sidechain words', { isSidechain: true }),
+    ),
+    'f',
+    'p',
+    'id',
+  );
+  assert.match(s.searchText, /Find the flaky test/);
+  assert.match(s.searchText, /race in setup/);
+  assert.match(s.searchText, /Peer note here/);
+  for (const absent of ['secret reminder', 'private musing', 'toolinput', 'tooloutput', 'sidechain']) {
+    assert.ok(!s.searchText.includes(absent), absent);
+  }
+});
+
+test('matchText finds tokens case-insensitively and cuts a snippet around the earliest hit', () => {
+  const text = 'x '.repeat(100) + 'The Culprit is a race in setup. ' + 'y '.repeat(200);
+  const m = matchText(text, ['race', 'culprit', 'missing', 'a+b']);
+  assert.deepEqual(m.found, ['race', 'culprit']);
+  assert.ok(m.snippet.startsWith('…'));
+  assert.ok(m.snippet.endsWith('…'));
+  assert.match(m.snippet, /The Culprit is a race/);
+  assert.ok(!m.snippet.includes('  '));
+  assert.deepEqual(matchText('short text', ['nope']), { found: [] });
+  assert.equal(matchText('short text', ['TEXT']).snippet, 'short text');
 });
 
 test('HEAD branch is ignored', () => {

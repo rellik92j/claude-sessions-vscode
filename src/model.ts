@@ -1,7 +1,7 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { DATE_BUCKETS, dateBucket, isInside, normalizePath } from './format';
-import { decodeProjectDir, SessionInfo } from './sessionParser';
+import { decodeProjectDir, matchText, SessionInfo, TextMatch } from './sessionParser';
 import { SessionStore, sortTime } from './sessionStore';
 
 export type GroupBy = 'project' | 'date';
@@ -86,6 +86,21 @@ export class SessionModel {
       list = list.filter((s) => folders.some((f) => isInside(projectPath(s), f)));
     }
     return list;
+  }
+
+  /** Which search tokens each visible session's transcript contains, keyed by session id (sessions with no hits omitted). */
+  searchTranscripts(tokens: string[]): Record<string, TextMatch> {
+    const hits: Record<string, TextMatch> = {};
+    if (!tokens.length) {
+      return hits;
+    }
+    for (const s of this.visibleSessions()) {
+      const m = matchText(s.searchText, tokens);
+      if (m.found.length) {
+        hits[s.id] = m;
+      }
+    }
+    return hits;
   }
 
   groups(): SessionGroup[] {
