@@ -1,7 +1,8 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { DATE_BUCKETS, dateBucket, isInside, normalizePath } from './format';
-import { decodeProjectDir, matchText, SessionInfo, TextMatch } from './sessionParser';
+import { evaluate, Query, snippet } from './query';
+import { decodeProjectDir, SessionInfo } from './sessionParser';
 import { SessionStore, sortTime } from './sessionStore';
 
 export type GroupBy = 'project' | 'date';
@@ -14,6 +15,12 @@ export interface SessionGroup {
   path?: string;
   expanded: boolean;
   sessions: SessionInfo[];
+}
+
+export interface SearchHit {
+  session: SessionInfo;
+  /** Matching passage from the transcript, when the match isn't visible otherwise. */
+  snippet?: string;
 }
 
 export function projectPath(s: SessionInfo): string {
@@ -88,16 +95,16 @@ export class SessionModel {
     return list;
   }
 
-  /** Which search tokens each visible session's transcript contains, keyed by session id (sessions with no hits omitted). */
-  searchTranscripts(tokens: string[]): Record<string, TextMatch> {
-    const hits: Record<string, TextMatch> = {};
-    if (!tokens.length) {
-      return hits;
-    }
+  /**
+   * Visible sessions matching the query in what the caller shows for them (`shownText`) or in their transcript.
+   * A snippet is included when the shown text alone doesn't explain the match.
+   */
+  search(q: Query, shownText: (s: SessionInfo) => string): SearchHit[] {
+    const hits: SearchHit[] = [];
     for (const s of this.visibleSessions()) {
-      const m = matchText(s.searchText, tokens);
-      if (m.found.length) {
-        hits[s.id] = m;
+      const shown = shownText(s);
+      if (evaluate(q, [shown, s.searchText])) {
+        hits.push({ session: s, snippet: evaluate(q, [shown]) ? undefined : snippet(s.searchText, q) });
       }
     }
     return hits;

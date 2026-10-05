@@ -373,9 +373,18 @@ body.vscode-light .tag.project { color: hsl(var(--hue) 60% 35%); }
 
 mark {
   background: var(--vscode-editor-findMatchHighlightBackground, rgba(234, 92, 0, 0.33));
-  color: inherit;
+  /* Full-contrast text: the muted excerpt grey is hard to read on the translucent highlight. */
+  color: var(--vscode-foreground);
   border-radius: 2px;
   padding: 0 1px;
+}
+/* Colored tags (agent, project, PR) can clash with the find-match color (orange on orange), so a match inside a
+   tag is inverted instead: the tag's own color as background, the editor background as text. */
+.tag mark {
+  color: inherit;
+  background: currentColor;
+  -webkit-text-fill-color: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  border-radius: 3px;
 }
 
 /* ---------- empty + loading ---------- */

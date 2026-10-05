@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { formatRelative, isInside } from './format';
 import { GroupBy, projectPath, SessionModel } from './model';
+import { isEmptyQuery, parseQuery } from './query';
 import { SessionInfo } from './sessionParser';
 import { defaultProjectsDir, SessionStore, sortTime } from './sessionStore';
 import { SidebarView } from './sidebarView';
@@ -235,7 +236,6 @@ function toTokens(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((t): t is string => typeof t === 'string' && !!t) : [];
 }
 
-const searchTokens = (query: string) => query.toLowerCase().split(/\s+/).filter(Boolean);
 
 function toPicks(sessions: SessionInfo[]): SessionPick[] {
   return sessions.map((s) => ({
@@ -268,28 +268,30 @@ async function searchSessions(model: SessionModel): Promise<void> {
     await model.reload();
   }
   const qp = vscode.window.createQuickPick<SessionPick>();
-  qp.placeholder = 'Search sessions and transcripts — Enter opens the transcript';
+  qp.placeholder = 'Search sessions and transcripts ("exact phrase", -exclude, a OR b) — Enter opens the transcript';
   qp.matchOnDescription = true;
   qp.matchOnDetail = true;
   const basePicks = toPicks(model.visibleSessions()).map((p) => ({ ...p, buttons: [RESUME_BUTTON] }));
+  const byId = new Map(basePicks.map((p) => [p.session.id, p]));
   qp.items = basePicks;
-  // The quick pick only filters on what it shows, so sessions found via their transcript are forced visible
-  // (alwaysShow) and show the matching passage in place of their prompts.
+  // The quick pick's own fuzzy filter knows neither the query syntax nor the transcripts, so while searching the
+  // list holds only our matches, all marked alwaysShow so the built-in filter leaves them alone. Sessions found
+  // via their transcript show the matching passage in place of their prompts.
   qp.onDidChangeValue((value) => {
-    const tokens = searchTokens(value);
-    const hits = model.searchTranscripts(tokens);
-    qp.items = basePicks.map((p) => {
-      const hit = hits[p.session.id];
-      if (!hit) {
-        return p;
-      }
-      const shown = [p.label, p.description, p.detail].join(' ').toLowerCase();
-      const missing = tokens.filter((t) => !shown.includes(t));
-      if (!missing.length || !missing.every((t) => hit.found.includes(t))) {
-        return p;
-      }
-      return { ...p, alwaysShow: true, detail: `$(quote) ${hit.snippet ?? ''}` };
-    });
+    const q = parseQuery(value);
+    if (isEmptyQuery(q)) {
+      qp.items = basePicks;
+      return;
+    }
+    qp.items = model
+      .search(q, (s) => {
+        const p = byId.get(s.id);
+        return p ? [p.label, p.description, p.detail].join('\0') : '';
+      })
+      .flatMap((hit) => {
+        const p = byId.get(hit.session.id);
+        return p ? [{ ...p, alwaysShow: true, detail: hit.snippet ? `$(quote) ${hit.snippet}` : p.detail }] : [];
+      });
   });
   qp.onDidTriggerItemButton((e) => {
     qp.hide();
@@ -297,10 +299,10 @@ async function searchSessions(model: SessionModel): Promise<void> {
   });
   qp.onDidAccept(() => {
     const item = qp.selectedItems[0];
-    const tokens = searchTokens(qp.value);
+    const highlight = parseQuery(qp.value).highlight;
     qp.hide();
     if (item) {
-      vscode.commands.executeCommand('claudeSessions.openTranscript', item.session, tokens);
+      vscode.commands.executeCommand('claudeSessions.openTranscript', item.session, highlight);
     }
   });
   qp.onDidHide(() => qp.dispose());

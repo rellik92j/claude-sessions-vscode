@@ -53,7 +53,9 @@
 
   /** Wraps every occurrence of the search words in message text (not tool calls or thinking) in <mark class="hit">. */
   function markHits(words) {
-    const re = new RegExp(words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'gi');
+    // Spaces in a phrase match any whitespace. A phrase split by formatting (e.g. "dark **mode**") isn't marked.
+    const pattern = (w) => w.split(' ').map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
+    const re = new RegExp(words.map(pattern).join('|'), 'gi');
     const root = document.querySelector('.conversation');
     if (!root) return [];
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {

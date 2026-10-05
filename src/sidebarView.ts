@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { normalizePath } from './format';
 import { GroupBy, projectPath, SessionModel } from './model';
+import { parseQuery } from './query';
 import { SessionInfo } from './sessionParser';
 import { sortTime } from './sessionStore';
 
@@ -61,6 +62,16 @@ export function toCard(s: SessionInfo): CardData {
     prNumber: s.prUrl ? s.prNumber : undefined,
     prRepository: s.prRepository,
   };
+}
+
+/** The card text a search matches against (besides the transcript). */
+function cardText(c: CardData): string {
+  return (
+    [c.title, c.excerpt, c.project, c.branch, c.agent, c.model, c.prNumber && `#${c.prNumber}`]
+      .filter(Boolean)
+      // NUL between fields so a phrase can't match across two of them.
+      .join('\0')
+  );
 }
 
 const PAGE_COMMANDS: Record<string, string> = {
@@ -167,9 +178,19 @@ export class SidebarView implements vscode.WebviewViewProvider {
         this.model.reload();
         break;
       case 'search': {
-        // Transcript text stays in the extension host; the webview gets back only which tokens hit and a snippet.
-        const tokens = Array.isArray(msg.tokens) ? msg.tokens.filter((t: unknown): t is string => typeof t === 'string' && !!t) : [];
-        this.view?.webview.postMessage({ type: 'searchResults', key: msg.key, hits: this.model.searchTranscripts(tokens) });
+        // Searching happens in the extension host (transcript text never goes to the webview); it gets back the
+        // matching ids, snippets for transcript-only matches, and the words to highlight.
+        const query = typeof msg.query === 'string' ? msg.query : '';
+        const q = parseQuery(query);
+        const snippets: Record<string, string> = {};
+        const ids: string[] = [];
+        for (const hit of this.model.search(q, (s) => cardText(toCard(s)))) {
+          ids.push(hit.session.id);
+          if (hit.snippet) {
+            snippets[hit.session.id] = hit.snippet;
+          }
+        }
+        this.view?.webview.postMessage({ type: 'searchResults', query, ids, snippets, highlight: q.highlight });
         break;
       }
     }

@@ -318,47 +318,6 @@ export function parseSession(text: string, filePath: string, projectDir: string,
   return info;
 }
 
-export interface TextMatch {
-  /** The search tokens found in the text. */
-  found: string[];
-  /** One line of context around the earliest match. */
-  snippet?: string;
-}
-
-const SNIPPET_BEFORE = 60;
-const SNIPPET_AFTER = 160;
-
-const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-/** Case-insensitively looks for each token in the text and cuts a snippet around the earliest match. */
-export function matchText(text: string, tokens: string[]): TextMatch {
-  const found: string[] = [];
-  let first: { index: number; length: number } | undefined;
-  for (const t of tokens) {
-    const m = new RegExp(escapeRegExp(t), 'i').exec(text);
-    if (m) {
-      found.push(t);
-      if (!first || m.index < first.index) {
-        first = { index: m.index, length: m[0].length };
-      }
-    }
-  }
-  if (!first) {
-    return { found };
-  }
-  let start = Math.max(0, first.index - SNIPPET_BEFORE);
-  const end = Math.min(text.length, first.index + first.length + SNIPPET_AFTER);
-  // Start at a word boundary so the snippet doesn't open mid-word.
-  if (start > 0) {
-    const space = text.slice(start, first.index).search(/\s/);
-    if (space !== -1) {
-      start += space + 1;
-    }
-  }
-  const body = text.slice(start, end).replace(/\s+/g, ' ').trim();
-  return { found, snippet: (start > 0 ? '…' : '') + body + (end < text.length ? '…' : '') };
-}
-
 function stringifyToolContent(content: unknown): string {
   if (typeof content === 'string') {
     return content;

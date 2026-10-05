@@ -124,12 +124,22 @@ test('bundled extension activates, fills the sidebar, and renders a transcript',
     assert.match(html, /hljs-keyword/);
     assert.doesNotMatch(html, /data-highlight/);
 
-    // Transcript search: the sidebar asks, the host answers with matched words and a snippet.
-    handler({ type: 'search', key: 'const toggle', tokens: ['const', 'toggle', 'nowhere'] });
-    const results = posted.filter((m) => m.type === 'searchResults').pop();
-    assert.equal(results.key, 'const toggle');
-    assert.deepEqual(results.hits['aaaa-1111'].found, ['const', 'toggle']);
-    assert.match(results.hits['aaaa-1111'].snippet, /dark mode\*\* toggle/);
+    // Search: the sidebar sends the query, the host answers with matching ids, snippets and highlight words.
+    const search = (query) => {
+      handler({ type: 'search', query });
+      return posted.filter((m) => m.type === 'searchResults').pop();
+    };
+    let results = search('"x = 1" toggle');
+    assert.equal(results.query, '"x = 1" toggle');
+    assert.deepEqual(results.ids, ['aaaa-1111']);
+    assert.deepEqual(results.highlight, ['x = 1', 'toggle']);
+    assert.match(results.snippets['aaaa-1111'], /x = 1/);
+    // Matched on the card alone: no snippet.
+    results = search('dark OR nothing');
+    assert.deepEqual(results.ids, ['aaaa-1111']);
+    assert.deepEqual(results.snippets, {});
+    assert.deepEqual(search('"toggle dark"').ids, []);
+    assert.deepEqual(search('toggle -const').ids, []);
 
     // Opening from a search passes the words on to the transcript page.
     handler({ type: 'run', command: 'openTranscript', id: 'aaaa-1111', highlight: ['const', 42] });

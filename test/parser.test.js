@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { parseSession, parseTranscript, classifyUserContent, decodeProjectDir, oneLine, matchText } = require('../out/sessionParser');
+const { parseSession, parseTranscript, classifyUserContent, decodeProjectDir, oneLine } = require('../out/sessionParser');
 const { formatRelative, dateBucket, isInside, normalizePath, escapeHtml } = require('../out/format');
 const { renderMarkdown } = require('../out/markdown');
 
@@ -100,18 +100,6 @@ test('searchText holds prompts, peer messages and replies but not tool I/O or th
   for (const absent of ['secret reminder', 'private musing', 'toolinput', 'tooloutput', 'sidechain']) {
     assert.ok(!s.searchText.includes(absent), absent);
   }
-});
-
-test('matchText finds tokens case-insensitively and cuts a snippet around the earliest hit', () => {
-  const text = 'x '.repeat(100) + 'The Culprit is a race in setup. ' + 'y '.repeat(200);
-  const m = matchText(text, ['race', 'culprit', 'missing', 'a+b']);
-  assert.deepEqual(m.found, ['race', 'culprit']);
-  assert.ok(m.snippet.startsWith('…'));
-  assert.ok(m.snippet.endsWith('…'));
-  assert.match(m.snippet, /The Culprit is a race/);
-  assert.ok(!m.snippet.includes('  '));
-  assert.deepEqual(matchText('short text', ['nope']), { found: [] });
-  assert.equal(matchText('short text', ['TEXT']).snippet, 'short text');
 });
 
 test('HEAD branch is ignored', () => {

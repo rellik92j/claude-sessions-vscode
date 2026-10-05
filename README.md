@@ -7,7 +7,7 @@ It reads the session logs Claude Code writes to `~/.claude/projects/<project>/<s
 ## Features
 
 - **Sessions sidebar**: a card for each session with its title, latest prompt, time, branch, prompt count, agent and PR badges. A green pulsing dot marks sessions that were active in the last few minutes.
-  - Instant search box (press `/`), with matches highlighted. Searches card details and the full conversation text (prompts and Claude's replies, not tool output); sessions matched in the transcript show the matching passage.
+  - Instant search box (press `/`), with matches highlighted. Searches card details and the full conversation text (prompts and Claude's replies, not tool output); sessions matched in the transcript show the matching passage. All words must match (anywhere, case-insensitive); `"exact phrase"` matches the phrase, `-word` or `-"some phrase"` excludes sessions containing it, and `a OR b` matches either.
   - **Projects / Recent** toggle to group by project (each with its own colored avatar) or by date (Today, Yesterday, Previous 7 Days, …).
   - **Workspace** filter: show only sessions started in the folders open in this window.
   - Hover a card for quick actions: ▶ resume, open in Claude Code chat, read transcript, copy ID. Right-click for more (copy resume command, raw JSONL, PR, open project folder).
