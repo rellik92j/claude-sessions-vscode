@@ -47,7 +47,9 @@ function fakeVscode(state) {
     window: {
       registerWebviewViewProvider: (id, provider) => ((state.providers[id] = provider), disposable),
       createWebviewPanel: () => {
-        const panel = { webview: webview(state.panelPosts), onDidDispose: () => disposable, reveal() {}, title: '' };
+        const panel = { webview: webview(state.panelPosts), reveal() {}, title: '' };
+        panel.onDidDispose = (f) => ((panel.dispose = f), disposable);
+        panel.webview.onDidReceiveMessage = (f) => ((panel.onMessage = f), disposable);
         state.panels.push(panel);
         return panel;
       },
@@ -146,6 +148,36 @@ test('bundled extension activates, fills the sidebar, and renders a transcript',
     await new Promise((r) => setTimeout(r, 100));
     assert.equal(state.panels.length, 1, 'existing panel reused');
     assert.match(state.panels[0].webview.html, /<body data-highlight="\[&quot;const&quot;\]">/);
+    assert.deepEqual(state.errors, []);
+
+    // Transcripts share one preview tab until kept open (Keep open button, or keepOpen from a double-click).
+    const open = (id, ...args) =>
+      state.commands['claudeSessions.openTranscript']({ ...sessionA, id, title: `Session ${id}` }, ...args);
+    const sessionA = { id: 'aaaa-1111', filePath: path.join(projectsDir, 'C--repo', 'aaaa-1111.jsonl'), projectDir: 'C--repo', promptCount: 1 };
+    const keepButton = /data-cmd="keepOpen"/;
+    assert.match(state.panels[0].webview.html, keepButton, 'first tab is the preview');
+    await open('bbbb');
+    assert.equal(state.panels.length, 1, 'preview tab reused for another session');
+    assert.equal(state.panels[0].title, 'Session bbbb');
+    await state.panels[0].onMessage({ command: 'keepOpen' });
+    await new Promise((r) => setTimeout(r, 50));
+    assert.doesNotMatch(state.panels[0].webview.html, keepButton, 'kept tab drops the button');
+    await open('cccc');
+    assert.equal(state.panels.length, 2, 'next transcript gets a new preview tab');
+    await open('bbbb');
+    assert.equal(state.panels.length, 2, 'kept session is focused, not reopened');
+    assert.equal(state.panels[1].title, 'Session cccc', 'preview untouched');
+    await open('cccc', [], true);
+    assert.equal(state.panels.length, 2, 'keepOpen on the previewed session promotes it');
+    assert.doesNotMatch(state.panels[1].webview.html, keepButton);
+    await state.commands['claudeSessions.openTranscriptInNewTab']({ ...sessionA, id: 'dddd', title: 'Session dddd' });
+    await open('eeee');
+    assert.equal(state.panels.length, 4);
+    assert.doesNotMatch(state.panels[2].webview.html, keepButton, 'Open in New Tab keeps it open');
+    assert.match(state.panels[3].webview.html, keepButton);
+    state.panels[3].dispose();
+    await open('ffff');
+    assert.equal(state.panels.length, 5, 'closing the preview tab means a new one next time');
     assert.deepEqual(state.errors, []);
 
     // Assets referenced by the webviews must exist on disk.

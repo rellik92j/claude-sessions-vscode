@@ -161,8 +161,12 @@ export class SidebarView implements vscode.WebviewViewProvider {
         const command = PAGE_COMMANDS[msg.command];
         const session = typeof msg.id === 'string' ? this.model.find(msg.id) : undefined;
         if (command && session) {
-          // openTranscript also gets the current search words to highlight.
-          vscode.commands.executeCommand(command, session, ...(msg.command === 'openTranscript' ? [msg.highlight] : []));
+          // openTranscript also gets the current search words to highlight, and whether to keep it in its own tab.
+          vscode.commands.executeCommand(
+            command,
+            session,
+            ...(msg.command === 'openTranscript' ? [msg.highlight, msg.keepOpen === true] : []),
+          );
         }
         break;
       }

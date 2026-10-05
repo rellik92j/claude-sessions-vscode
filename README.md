@@ -13,6 +13,7 @@ It reads the session logs Claude Code writes to `~/.claude/projects/<project>/<s
   - Hover a card for quick actions: ▶ resume, open in Claude Code chat, read transcript, copy ID. Right-click for more (copy resume command, raw JSONL, PR, open project folder).
   - Keyboard: ↑/↓ to move, Enter to read the transcript, Ctrl+Enter to resume.
 - **Transcript view**: a chat-style page. Your prompts are on the right, Claude's replies on the left with markdown, tables and syntax-highlighted code (with copy buttons). Each tool call is a compact row with a ✓/✗ status that expands to show its input and output, and edits show a red/green diff. Includes day separators, a toggle to hide tool calls, and a jump-to-latest button. Opened from a search, it highlights the search words and starts at the first match, with a bar to step through matches (F3 / Shift+F3, Esc to clear). The **Search Sessions…** command searches transcripts too.
+  - Transcripts open in one shared preview tab that the next one you open replaces, like VS Code preview editors, so tabs don't pile up. Double-click a session (or use **Keep open** in the transcript, or *Open Transcript in New Tab* from the right-click menu) to give it its own tab.
 - **Resume in Claude Code terminal**: opens the Claude Code CLI (`claude --resume <id>`) in a terminal tab beside your editor, in the session's folder, with the Claude logo, like the Claude Code extension's *Open in Terminal*. Resuming a session that is already open focuses its existing terminal.
 - **Open in Claude Code Chat**: reopens the session in the Claude Code extension's chat tab.
 - Everything follows your VS Code color theme (dark, light, high contrast) and auto-refreshes when session logs change.
@@ -29,6 +30,7 @@ It reads the session logs Claude Code writes to `~/.claude/projects/<project>/<s
 | `claudeSessions.claudeCommand` | `claude` | Command used when resuming. |
 | `claudeSessions.terminalLocation` | `editor` | `editor` (tab beside the editor) or `panel` (bottom terminal panel). |
 | `claudeSessions.showThinking` | `false` | Show Claude's thinking blocks in transcripts. |
+| `claudeSessions.reuseTranscriptTab` | `true` | Reuse one preview tab for transcripts; when off, every transcript gets its own tab. |
 
 ## Development
 

@@ -186,9 +186,14 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('claudeSessions.showAll', () => setConfig('currentWorkspaceOnly', false)),
     vscode.commands.registerCommand('claudeSessions.resume', withSession(resume)),
     vscode.commands.registerCommand('claudeSessions.openInClaudeCode', withSession(openInClaudeCode)),
-    // Optional second argument: search words to highlight in the transcript.
-    vscode.commands.registerCommand('claudeSessions.openTranscript', (arg: unknown, highlight?: unknown) =>
-      withSession((s) => transcripts.open(s, toTokens(highlight)))(arg),
+    // Optional arguments: search words to highlight in the transcript, and true to open it in its own tab
+    // rather than the shared preview tab.
+    vscode.commands.registerCommand('claudeSessions.openTranscript', (arg: unknown, highlight?: unknown, keepOpen?: unknown) =>
+      withSession((s) => transcripts.open(s, toTokens(highlight), keepOpen === true))(arg),
+    ),
+    vscode.commands.registerCommand(
+      'claudeSessions.openTranscriptInNewTab',
+      withSession((s) => transcripts.open(s, [], true)),
     ),
     vscode.commands.registerCommand(
       'claudeSessions.openRawFile',
