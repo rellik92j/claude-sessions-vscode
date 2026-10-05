@@ -9,26 +9,58 @@ import { parseTranscript, SessionInfo, TranscriptEntry, TranscriptPart } from '.
 
 type ToolPart = Extract<TranscriptPart, { kind: 'tool_use' }>;
 
-/** One webview per session; re-opening a session focuses its existing panel. */
+/** A transcript tab and what it currently shows; the preview tab switches sessions, so this is mutable. */
+interface TranscriptTab {
+  panel: vscode.WebviewPanel;
+  session: SessionInfo;
+  /** Search words to highlight, from the search that opened it. */
+  highlight: string[];
+  preview: boolean;
+}
+
+/**
+ * Like VS Code's preview editors: by default every transcript opens in one shared preview tab that is replaced by the
+ * next one opened. "Keep open" (or double-clicking the card) turns it into a regular tab that stays. A session that
+ * already has a regular tab is just focused.
+ */
 export class TranscriptPanels {
-  private readonly panels = new Map<string, vscode.WebviewPanel>();
-  /** Search words to highlight per session, from the search that opened it. */
-  private readonly highlights = new Map<string, string[]>();
+  /** Regular (kept) tabs by session id. */
+  private readonly pinned = new Map<string, TranscriptTab>();
+  private preview: TranscriptTab | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly hasClaudeCode: () => boolean,
   ) {}
 
-  /** Opens the transcript; `highlight` words are marked and the page opens at the first match. */
-  async open(session: SessionInfo, highlight: string[] = []): Promise<void> {
-    this.highlights.set(session.id, highlight);
-    const existing = this.panels.get(session.id);
-    if (existing) {
-      existing.reveal();
-      await this.render(existing, session);
+  /**
+   * Opens the transcript; `highlight` words are marked and the page opens at the first match.
+   * `keepOpen` opens it in (or turns the preview into) a regular tab instead of the preview tab.
+   */
+  async open(session: SessionInfo, highlight: string[] = [], keepOpen = false): Promise<void> {
+    const usePreview = !keepOpen && vscode.workspace.getConfiguration('claudeSessions').get<boolean>('reuseTranscriptTab', true);
+    let tab = this.pinned.get(session.id);
+    if (!tab && this.preview?.session.id === session.id) {
+      tab = this.preview;
+      if (!usePreview) {
+        this.promote(tab);
+      }
+    }
+    if (!tab && usePreview && this.preview) {
+      tab = this.preview;
+    }
+    if (tab) {
+      tab.session = session;
+      tab.highlight = highlight;
+      tab.panel.reveal();
+      await this.render(tab);
       return;
     }
+    tab = this.create(session, highlight, usePreview);
+    await this.render(tab);
+  }
+
+  private create(session: SessionInfo, highlight: string[], preview: boolean): TranscriptTab {
     const panel = vscode.window.createWebviewPanel('claudeSessions.transcript', session.title, vscode.ViewColumn.Active, {
       enableScripts: true,
       enableFindWidget: true,
@@ -39,10 +71,18 @@ export class TranscriptPanels {
     panel.iconPath = claudeCode
       ? vscode.Uri.joinPath(claudeCode.extensionUri, 'resources', 'claude-logo.svg')
       : new vscode.ThemeIcon('comment-discussion');
-    this.panels.set(session.id, panel);
+    const tab: TranscriptTab = { panel, session, highlight, preview };
+    if (preview) {
+      this.preview = tab;
+    } else {
+      this.pinned.set(session.id, tab);
+    }
     panel.onDidDispose(() => {
-      this.panels.delete(session.id);
-      this.highlights.delete(session.id);
+      if (this.preview === tab) {
+        this.preview = undefined;
+      } else if (this.pinned.get(tab.session.id) === tab) {
+        this.pinned.delete(tab.session.id);
+      }
     });
     panel.webview.onDidReceiveMessage(async (msg) => {
       switch (msg?.command) {
@@ -51,7 +91,7 @@ export class TranscriptPanels {
         case 'copyId':
         case 'openRawFile':
         case 'openPr':
-          vscode.commands.executeCommand(`claudeSessions.${msg.command}`, session);
+          vscode.commands.executeCommand(`claudeSessions.${msg.command}`, tab.session);
           break;
         case 'copyText':
           if (typeof msg.text === 'string') {
@@ -60,11 +100,26 @@ export class TranscriptPanels {
           }
           break;
         case 'refresh':
-          this.render(panel, session);
+          this.render(tab);
+          break;
+        case 'keepOpen':
+          if (tab.preview) {
+            this.promote(tab);
+            this.render(tab);
+          }
           break;
       }
     });
-    await this.render(panel, session);
+    return tab;
+  }
+
+  /** Turns the preview tab into a regular tab; the next transcript opened gets a new preview tab. */
+  private promote(tab: TranscriptTab): void {
+    if (this.preview === tab) {
+      this.preview = undefined;
+    }
+    tab.preview = false;
+    this.pinned.set(tab.session.id, tab);
   }
 
   private get codiconsUri() {
@@ -75,7 +130,8 @@ export class TranscriptPanels {
     return vscode.Uri.joinPath(this.extensionUri, 'media');
   }
 
-  private async render(panel: vscode.WebviewPanel, session: SessionInfo): Promise<void> {
+  private async render(tab: TranscriptTab): Promise<void> {
+    const { panel, session } = tab;
     let entries: TranscriptEntry[];
     try {
       entries = parseTranscript(await fs.readFile(session.filePath, 'utf8'));
@@ -88,7 +144,8 @@ export class TranscriptPanels {
     panel.title = session.title;
     webview.html = buildHtml(session, entries, {
       showThinking,
-      highlight: this.highlights.get(session.id) ?? [],
+      highlight: tab.highlight,
+      preview: tab.preview,
       hasClaudeCode: this.hasClaudeCode(),
       cspSource: webview.cspSource,
       codiconCss: webview.asWebviewUri(vscode.Uri.joinPath(this.codiconsUri, 'codicon.css')).toString(),
@@ -102,6 +159,8 @@ interface HtmlOptions {
   showThinking: boolean;
   /** Search words for transcript.js to mark. */
   highlight?: string[];
+  /** Shown in the shared preview tab: offer "Keep open". */
+  preview?: boolean;
   hasClaudeCode: boolean;
   cspSource: string;
   codiconCss: string;
@@ -329,6 +388,7 @@ export function buildHtml(session: SessionInfo, entries: TranscriptEntry[], o: H
   <div class="topbar-actions">
     <button class="btn primary" data-cmd="resume" title="Resume this session with the Claude Code CLI"><i class="codicon codicon-play"></i><span>Resume</span></button>
     ${o.hasClaudeCode ? '<button class="btn" data-cmd="openInClaudeCode" title="Open in the Claude Code chat"><i class="codicon codicon-comment-discussion"></i><span>Open in chat</span></button>' : ''}
+    ${o.preview ? '<button class="btn" data-cmd="keepOpen" title="This tab is reused for the next transcript you open. Keep this one in its own tab."><i class="codicon codicon-pinned"></i><span>Keep open</span></button>' : ''}
     <button class="icon-btn" data-cmd="refresh" title="Reload"><i class="codicon codicon-refresh"></i></button>
     <button class="icon-btn" data-cmd="copyId" title="Copy session ID"><i class="codicon codicon-copy"></i></button>
     <button class="icon-btn" data-cmd="openRawFile" title="Open raw JSONL"><i class="codicon codicon-json"></i></button>

@@ -265,8 +265,8 @@
 
   // ---------- events ----------
 
-  const run = (command, id) =>
-    vscode.postMessage({ type: 'run', command, id, highlight: command === 'openTranscript' ? words() : undefined });
+  const run = (command, id, keepOpen = false) =>
+    vscode.postMessage({ type: 'run', command, id, highlight: command === 'openTranscript' ? words() : undefined, keepOpen });
 
   $list.addEventListener('click', (e) => {
     const action = e.target.closest('[data-action]');
@@ -299,6 +299,14 @@
       run(action.dataset.action, card.dataset.id);
     } else {
       run('openTranscript', card.dataset.id);
+    }
+  });
+
+  // Like VS Code's explorer: a click previews the transcript in the shared tab, a double-click keeps it open.
+  $list.addEventListener('dblclick', (e) => {
+    const card = e.target.closest('.card');
+    if (card && !e.target.closest('[data-action], .group-header')) {
+      run('openTranscript', card.dataset.id, true);
     }
   });
 

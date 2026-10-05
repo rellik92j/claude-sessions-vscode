@@ -88,6 +88,12 @@
         "icon": "$(book)"
       },
       {
+        "command": "claudeSessions.openTranscriptInNewTab",
+        "title": "Open Transcript in New Tab",
+        "category": "Claude Sessions",
+        "icon": "$(pinned)"
+      },
+      {
         "command": "claudeSessions.openRawFile",
         "title": "Open Raw JSONL",
         "category": "Claude Sessions"
@@ -163,6 +169,10 @@
           "when": "false"
         },
         {
+          "command": "claudeSessions.openTranscriptInNewTab",
+          "when": "false"
+        },
+        {
           "command": "claudeSessions.openRawFile",
           "when": "false"
         },
@@ -204,9 +214,14 @@
           "group": "1_main@3"
         },
         {
+          "command": "claudeSessions.openTranscriptInNewTab",
+          "when": "webviewId == 'claudeSessions.list' && webviewSection == 'session'",
+          "group": "1_main@4"
+        },
+        {
           "command": "claudeSessions.openPr",
           "when": "webviewId == 'claudeSessions.list' && webviewSection == 'session' && sessionHasPr",
-          "group": "1_main@4"
+          "group": "1_main@5"
         },
         {
           "command": "claudeSessions.openRawFile",
@@ -274,6 +289,11 @@
           "type": "boolean",
           "default": false,
           "description": "Include Claude's thinking blocks in the transcript view."
+        },
+        "claudeSessions.reuseTranscriptTab": {
+          "type": "boolean",
+          "default": true,
+          "description": "Open transcripts in one shared preview tab that the next transcript replaces, like VS Code preview editors. Double-click a session, or use Keep open, to give it its own tab. When off, every transcript gets its own tab."
         },
         "claudeSessions.hideEmptySessions": {
           "type": "boolean",
