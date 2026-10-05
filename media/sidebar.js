@@ -6,6 +6,11 @@
   const collapsed = saved.collapsed || {};
   let query = saved.query || '';
   let state = null;
+  /**
+   * Latest results from the extension, which does the matching (query syntax, card text and transcripts):
+   * the query they answer, matching session ids, transcript snippets by id, and the words to highlight.
+   */
+  let search = { query: '', ids: null, snippets: {}, highlight: [] };
 
   const LIVE_MS = 3 * 60 * 1000;
 
@@ -14,7 +19,7 @@
     <header class="toolbar">
       <label class="search">
         <i class="codicon codicon-search"></i>
-        <input id="q" type="text" placeholder="Search sessions" spellcheck="false" aria-label="Search sessions" />
+        <input id="q" type="text" placeholder="Search sessions and transcripts" title="Search titles, prompts and transcripts. &quot;exact phrase&quot;, -word to exclude, a OR b for either." spellcheck="false" aria-label="Search sessions and transcripts" />
         <button class="icon-btn clear" id="clear" title="Clear (Esc)" aria-label="Clear search"><i class="codicon codicon-close"></i></button>
       </label>
       <div class="controls">
@@ -42,15 +47,18 @@
   const esc = (s) =>
     String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
-  function tokens() {
-    return query.toLowerCase().split(/\s+/).filter(Boolean);
-  }
+  const searching = () => !!query.trim();
+
+  /** Words/phrases to highlight for the current query (the last results' until new ones arrive). */
+  const words = () => (searching() ? search.highlight : []);
 
   /** Escapes text and wraps search matches in <mark>. */
   function hl(text, toks) {
     text = String(text ?? '');
     if (!toks.length) return esc(text);
-    const re = new RegExp('(' + toks.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')', 'gi');
+    // Spaces in a phrase match any whitespace, as in the extension's matching.
+    const pattern = (t) => t.split(' ').map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
+    const re = new RegExp('(' + toks.map(pattern).join('|') + ')', 'gi');
     return text
       .split(re)
       .map((part, i) => (i % 2 ? `<mark>${esc(part)}</mark>` : esc(part)))
@@ -80,14 +88,17 @@
     return s.toUpperCase();
   }
 
-  function matches(s, toks) {
-    if (!toks.length) return true;
-    const hay = [s.title, s.excerpt, s.project, s.branch, s.agent, s.model, s.prNumber && `#${s.prNumber}`]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase();
-    return toks.every((t) => hay.includes(t));
+  // While new results are on their way, the previous ones keep filtering the list.
+  function matches(s) {
+    return !searching() || !search.ids || search.ids.has(s.id);
   }
+
+  /** Asks the extension to search for the current query. */
+  function requestSearch() {
+    if (searching()) vscode.postMessage({ type: 'search', query });
+  }
+
+  const searchPending = () => searching() && search.query !== query;
 
   const DATE_ICONS = { Today: 'calendar', Yesterday: 'history', 'Previous 7 Days': 'history', 'Previous 30 Days': 'history', Older: 'archive' };
 
@@ -117,7 +128,7 @@
           <div class="title">${hl(s.title, toks)}</div>
           <time data-t="${s.lastTime}" title="${esc(fullDate(s.lastTime))}">${relative(s.lastTime, now)}</time>
         </div>
-        ${s.excerpt ? `<div class="excerpt">${hl(s.excerpt, toks)}</div>` : ''}
+        ${excerptHtml(s, toks)}
         <div class="meta">${meta}</div>
         <div class="card-actions">
           <button class="icon-btn accent" data-action="resume" title="Resume in Claude Code terminal (Ctrl+Enter)"><i class="codicon codicon-play"></i></button>
@@ -128,10 +139,19 @@
       </div>`;
   }
 
+  // When the card itself doesn't explain the match, show where the transcript matched instead of the latest prompt.
+  function excerptHtml(s, toks) {
+    const snippet = searching() && search.snippets[s.id];
+    if (snippet) {
+      return `<div class="excerpt transcript-match" title="Found in the transcript"><i class="codicon codicon-quote"></i>${hl(snippet, toks)}</div>`;
+    }
+    return s.excerpt ? `<div class="excerpt">${hl(s.excerpt, toks)}</div>` : '';
+  }
+
   function renderGroup(g, toks, now) {
-    const sessions = g.sessions.filter((s) => matches(s, toks));
+    const sessions = g.sessions.filter(matches);
     if (!sessions.length) return '';
-    const isCollapsed = toks.length ? false : collapsed[g.key] ?? !g.expanded;
+    const isCollapsed = searching() ? false : collapsed[g.key] ?? !g.expanded;
     const avatar =
       g.kind === 'project'
         ? `<span class="avatar" style="--hue:${g.hue}">${esc(initials(g.label))}</span>`
@@ -181,12 +201,12 @@
       return;
     }
 
-    const toks = tokens();
+    const toks = words();
     const now = Date.now();
     const html = state.groups.map((g) => renderGroup(g, toks, now)).join('');
-    const shown = state.groups.reduce((n, g) => n + g.sessions.filter((s) => matches(s, toks)).length, 0);
+    const shown = state.groups.reduce((n, g) => n + g.sessions.filter(matches).length, 0);
     const projects = new Set(state.groups.flatMap((g) => g.sessions.map((s) => s.projectPath.toLowerCase()))).size;
-    $summary.textContent = toks.length
+    $summary.textContent = searching()
       ? `${shown} of ${state.total} sessions`
       : `${state.total} session${state.total === 1 ? '' : 's'} · ${projects} project${projects === 1 ? '' : 's'}`;
 
@@ -203,8 +223,11 @@
         'No sessions yet',
         'Run claude in a terminal and your sessions will show up here automatically.',
       );
+    } else if (!html && searchPending()) {
+      // Transcript results are on their way; avoid flashing "No matches".
+      $list.innerHTML = '';
     } else if (!html) {
-      $list.innerHTML = emptyState('search', 'No matches', `Nothing matches “${query}”. Try fewer words.`);
+      $list.innerHTML = emptyState('search', 'No matches', `Nothing matches “${query}”. Try fewer words, or check the quotes and minus signs.`);
     } else {
       $list.innerHTML = html;
     }
@@ -242,7 +265,8 @@
 
   // ---------- events ----------
 
-  const run = (command, id) => vscode.postMessage({ type: 'run', command, id });
+  const run = (command, id) =>
+    vscode.postMessage({ type: 'run', command, id, highlight: command === 'openTranscript' ? words() : undefined });
 
   $list.addEventListener('click', (e) => {
     const action = e.target.closest('[data-action]');
@@ -261,8 +285,8 @@
       if (!nowCollapsed && group) {
         // Render the cards lazily on expand.
         header.parentElement.querySelector('.cards').innerHTML = group.sessions
-          .filter((s) => matches(s, tokens()))
-          .map((s) => renderCard(s, group.kind === 'date', tokens(), Date.now()))
+          .filter(matches)
+          .map((s) => renderCard(s, group.kind === 'date', words(), Date.now()))
           .join('');
       }
       header.parentElement.classList.toggle('collapsed', nowCollapsed);
@@ -310,6 +334,7 @@
     searchTimer = setTimeout(() => {
       query = $q.value;
       save();
+      requestSearch();
       render();
     }, 60);
   });
@@ -369,6 +394,8 @@
       // Keep keyboard focus on the same card across re-renders.
       const focusedId = document.activeElement?.closest?.('.card')?.dataset.id;
       state = msg;
+      // Sessions may have changed; refresh transcript matches (the previous ones stay shown meanwhile).
+      requestSearch();
       render();
       if (focusedId) {
         const el = $list.querySelector(`.card[data-id="${CSS.escape(focusedId)}"]`);
@@ -377,6 +404,11 @@
           el.tabIndex = 0;
           el.focus({ preventScroll: true });
         }
+      }
+    } else if (msg?.type === 'searchResults') {
+      if (msg.query === query) {
+        search = { query: msg.query, ids: new Set(msg.ids || []), snippets: msg.snippets || {}, highlight: msg.highlight || [] };
+        render();
       }
     } else if (msg?.type === 'focusSearch') {
       $q.focus();

@@ -1,6 +1,7 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { DATE_BUCKETS, dateBucket, isInside, normalizePath } from './format';
+import { evaluate, Query, snippet } from './query';
 import { decodeProjectDir, SessionInfo } from './sessionParser';
 import { SessionStore, sortTime } from './sessionStore';
 
@@ -14,6 +15,12 @@ export interface SessionGroup {
   path?: string;
   expanded: boolean;
   sessions: SessionInfo[];
+}
+
+export interface SearchHit {
+  session: SessionInfo;
+  /** Matching passage from the transcript, when the match isn't visible otherwise. */
+  snippet?: string;
 }
 
 export function projectPath(s: SessionInfo): string {
@@ -86,6 +93,21 @@ export class SessionModel {
       list = list.filter((s) => folders.some((f) => isInside(projectPath(s), f)));
     }
     return list;
+  }
+
+  /**
+   * Visible sessions matching the query in what the caller shows for them (`shownText`) or in their transcript.
+   * A snippet is included when the shown text alone doesn't explain the match.
+   */
+  search(q: Query, shownText: (s: SessionInfo) => string): SearchHit[] {
+    const hits: SearchHit[] = [];
+    for (const s of this.visibleSessions()) {
+      const shown = shownText(s);
+      if (evaluate(q, [shown, s.searchText])) {
+        hits.push({ session: s, snippet: evaluate(q, [shown]) ? undefined : snippet(s.searchText, q) });
+      }
+    }
+    return hits;
   }
 
   groups(): SessionGroup[] {

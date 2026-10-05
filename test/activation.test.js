@@ -122,6 +122,30 @@ test('bundled extension activates, fills the sidebar, and renders a transcript',
     const html = state.panels[0]?.webview.html ?? '';
     assert.match(html, /<strong>dark mode<\/strong>/);
     assert.match(html, /hljs-keyword/);
+    assert.doesNotMatch(html, /data-highlight/);
+
+    // Search: the sidebar sends the query, the host answers with matching ids, snippets and highlight words.
+    const search = (query) => {
+      handler({ type: 'search', query });
+      return posted.filter((m) => m.type === 'searchResults').pop();
+    };
+    let results = search('"x = 1" toggle');
+    assert.equal(results.query, '"x = 1" toggle');
+    assert.deepEqual(results.ids, ['aaaa-1111']);
+    assert.deepEqual(results.highlight, ['x = 1', 'toggle']);
+    assert.match(results.snippets['aaaa-1111'], /x = 1/);
+    // Matched on the card alone: no snippet.
+    results = search('dark OR nothing');
+    assert.deepEqual(results.ids, ['aaaa-1111']);
+    assert.deepEqual(results.snippets, {});
+    assert.deepEqual(search('"toggle dark"').ids, []);
+    assert.deepEqual(search('toggle -const').ids, []);
+
+    // Opening from a search passes the words on to the transcript page.
+    handler({ type: 'run', command: 'openTranscript', id: 'aaaa-1111', highlight: ['const', 42] });
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(state.panels.length, 1, 'existing panel reused');
+    assert.match(state.panels[0].webview.html, /<body data-highlight="\[&quot;const&quot;\]">/);
     assert.deepEqual(state.errors, []);
 
     // Assets referenced by the webviews must exist on disk.

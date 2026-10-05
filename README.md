@@ -7,12 +7,12 @@ It reads the session logs Claude Code writes to `~/.claude/projects/<project>/<s
 ## Features
 
 - **Sessions sidebar**: a card for each session with its title, latest prompt, time, branch, prompt count, agent and PR badges. A green pulsing dot marks sessions that were active in the last few minutes.
-  - Instant search box (press `/`), with matches highlighted.
+  - Instant search box (press `/`), with matches highlighted. Searches card details and the full conversation text (prompts and Claude's replies, not tool output); sessions matched in the transcript show the matching passage. All words must match (anywhere, case-insensitive); `"exact phrase"` matches the phrase, `-word` or `-"some phrase"` excludes sessions containing it, and `a OR b` matches either.
   - **Projects / Recent** toggle to group by project (each with its own colored avatar) or by date (Today, Yesterday, Previous 7 Days, …).
   - **Workspace** filter: show only sessions started in the folders open in this window.
   - Hover a card for quick actions: ▶ resume, open in Claude Code chat, read transcript, copy ID. Right-click for more (copy resume command, raw JSONL, PR, open project folder).
   - Keyboard: ↑/↓ to move, Enter to read the transcript, Ctrl+Enter to resume.
-- **Transcript view**: a chat-style page. Your prompts are on the right, Claude's replies on the left with markdown, tables and syntax-highlighted code (with copy buttons). Each tool call is a compact row with a ✓/✗ status that expands to show its input and output, and edits show a red/green diff. Includes day separators, a toggle to hide tool calls, and a jump-to-latest button.
+- **Transcript view**: a chat-style page. Your prompts are on the right, Claude's replies on the left with markdown, tables and syntax-highlighted code (with copy buttons). Each tool call is a compact row with a ✓/✗ status that expands to show its input and output, and edits show a red/green diff. Includes day separators, a toggle to hide tool calls, and a jump-to-latest button. Opened from a search, it highlights the search words and starts at the first match, with a bar to step through matches (F3 / Shift+F3, Esc to clear). The **Search Sessions…** command searches transcripts too.
 - **Resume in Claude Code terminal**: opens the Claude Code CLI (`claude --resume <id>`) in a terminal tab beside your editor, in the session's folder, with the Claude logo, like the Claude Code extension's *Open in Terminal*. Resuming a session that is already open focuses its existing terminal.
 - **Open in Claude Code Chat**: reopens the session in the Claude Code extension's chat tab.
 - Everything follows your VS Code color theme (dark, light, high contrast) and auto-refreshes when session logs change.

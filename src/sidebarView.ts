@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { normalizePath } from './format';
 import { GroupBy, projectPath, SessionModel } from './model';
+import { parseQuery } from './query';
 import { SessionInfo } from './sessionParser';
 import { sortTime } from './sessionStore';
 
@@ -61,6 +62,16 @@ export function toCard(s: SessionInfo): CardData {
     prNumber: s.prUrl ? s.prNumber : undefined,
     prRepository: s.prRepository,
   };
+}
+
+/** The card text a search matches against (besides the transcript). */
+function cardText(c: CardData): string {
+  return (
+    [c.title, c.excerpt, c.project, c.branch, c.agent, c.model, c.prNumber && `#${c.prNumber}`]
+      .filter(Boolean)
+      // NUL between fields so a phrase can't match across two of them.
+      .join('\0')
+  );
 }
 
 const PAGE_COMMANDS: Record<string, string> = {
@@ -150,7 +161,8 @@ export class SidebarView implements vscode.WebviewViewProvider {
         const command = PAGE_COMMANDS[msg.command];
         const session = typeof msg.id === 'string' ? this.model.find(msg.id) : undefined;
         if (command && session) {
-          vscode.commands.executeCommand(command, session);
+          // openTranscript also gets the current search words to highlight.
+          vscode.commands.executeCommand(command, session, ...(msg.command === 'openTranscript' ? [msg.highlight] : []));
         }
         break;
       }
@@ -165,6 +177,22 @@ export class SidebarView implements vscode.WebviewViewProvider {
       case 'refresh':
         this.model.reload();
         break;
+      case 'search': {
+        // Searching happens in the extension host (transcript text never goes to the webview); it gets back the
+        // matching ids, snippets for transcript-only matches, and the words to highlight.
+        const query = typeof msg.query === 'string' ? msg.query : '';
+        const q = parseQuery(query);
+        const snippets: Record<string, string> = {};
+        const ids: string[] = [];
+        for (const hit of this.model.search(q, (s) => cardText(toCard(s)))) {
+          ids.push(hit.session.id);
+          if (hit.snippet) {
+            snippets[hit.session.id] = hit.snippet;
+          }
+        }
+        this.view?.webview.postMessage({ type: 'searchResults', query, ids, snippets, highlight: q.highlight });
+        break;
+      }
     }
   }
 

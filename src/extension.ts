@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { formatRelative, isInside } from './format';
 import { GroupBy, projectPath, SessionModel } from './model';
+import { isEmptyQuery, parseQuery } from './query';
 import { SessionInfo } from './sessionParser';
 import { defaultProjectsDir, SessionStore, sortTime } from './sessionStore';
 import { SidebarView } from './sidebarView';
@@ -185,7 +186,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('claudeSessions.showAll', () => setConfig('currentWorkspaceOnly', false)),
     vscode.commands.registerCommand('claudeSessions.resume', withSession(resume)),
     vscode.commands.registerCommand('claudeSessions.openInClaudeCode', withSession(openInClaudeCode)),
-    vscode.commands.registerCommand('claudeSessions.openTranscript', withSession((s) => transcripts.open(s))),
+    // Optional second argument: search words to highlight in the transcript.
+    vscode.commands.registerCommand('claudeSessions.openTranscript', (arg: unknown, highlight?: unknown) =>
+      withSession((s) => transcripts.open(s, toTokens(highlight)))(arg),
+    ),
     vscode.commands.registerCommand(
       'claudeSessions.openRawFile',
       withSession((s) => vscode.window.showTextDocument(vscode.Uri.file(s.filePath), { preview: true })),
@@ -228,6 +232,11 @@ interface SessionPick extends vscode.QuickPickItem {
   session: SessionInfo;
 }
 
+function toTokens(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((t): t is string => typeof t === 'string' && !!t) : [];
+}
+
+
 function toPicks(sessions: SessionInfo[]): SessionPick[] {
   return sessions.map((s) => ({
     label: s.title,
@@ -259,19 +268,41 @@ async function searchSessions(model: SessionModel): Promise<void> {
     await model.reload();
   }
   const qp = vscode.window.createQuickPick<SessionPick>();
-  qp.placeholder = 'Search sessions by title, project, or prompt — Enter opens the transcript';
+  qp.placeholder = 'Search sessions and transcripts ("exact phrase", -exclude, a OR b) — Enter opens the transcript';
   qp.matchOnDescription = true;
   qp.matchOnDetail = true;
-  qp.items = toPicks(model.visibleSessions()).map((p) => ({ ...p, buttons: [RESUME_BUTTON] }));
+  const basePicks = toPicks(model.visibleSessions()).map((p) => ({ ...p, buttons: [RESUME_BUTTON] }));
+  const byId = new Map(basePicks.map((p) => [p.session.id, p]));
+  qp.items = basePicks;
+  // The quick pick's own fuzzy filter knows neither the query syntax nor the transcripts, so while searching the
+  // list holds only our matches, all marked alwaysShow so the built-in filter leaves them alone. Sessions found
+  // via their transcript show the matching passage in place of their prompts.
+  qp.onDidChangeValue((value) => {
+    const q = parseQuery(value);
+    if (isEmptyQuery(q)) {
+      qp.items = basePicks;
+      return;
+    }
+    qp.items = model
+      .search(q, (s) => {
+        const p = byId.get(s.id);
+        return p ? [p.label, p.description, p.detail].join('\0') : '';
+      })
+      .flatMap((hit) => {
+        const p = byId.get(hit.session.id);
+        return p ? [{ ...p, alwaysShow: true, detail: hit.snippet ? `$(quote) ${hit.snippet}` : p.detail }] : [];
+      });
+  });
   qp.onDidTriggerItemButton((e) => {
     qp.hide();
     vscode.commands.executeCommand('claudeSessions.resume', e.item.session);
   });
   qp.onDidAccept(() => {
     const item = qp.selectedItems[0];
+    const highlight = parseQuery(qp.value).highlight;
     qp.hide();
     if (item) {
-      vscode.commands.executeCommand('claudeSessions.openTranscript', item.session);
+      vscode.commands.executeCommand('claudeSessions.openTranscript', item.session, highlight);
     }
   });
   qp.onDidHide(() => qp.dispose());

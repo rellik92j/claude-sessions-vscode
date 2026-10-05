@@ -30,6 +30,8 @@ export interface SessionInfo {
   agentName?: string;
   version?: string;
   model?: string;
+  /** Prompts, peer messages and Claude's replies (no tool I/O or thinking), for full-text search. */
+  searchText: string;
 }
 
 export type TranscriptPart =
@@ -167,7 +169,9 @@ export function parseSession(text: string, filePath: string, projectDir: string,
     promptCount: 0,
     assistantCount: 0,
     peerMessageCount: 0,
+    searchText: '',
   };
+  const searchParts: string[] = [];
   let customTitle: string | undefined;
   let aiTitle: string | undefined;
   let firstCommand: string | undefined;
@@ -246,6 +250,14 @@ export function parseSession(text: string, filePath: string, projectDir: string,
       if (typeof model === 'string' && !model.startsWith('<')) {
         info.model = model;
       }
+      const content = r.message?.content;
+      if (Array.isArray(content)) {
+        for (const p of content) {
+          if (p?.type === 'text' && typeof p.text === 'string' && p.text.trim()) {
+            searchParts.push(p.text);
+          }
+        }
+      }
       continue;
     }
 
@@ -254,6 +266,7 @@ export function parseSession(text: string, filePath: string, projectDir: string,
       if (peer) {
         info.peerMessageCount++;
         info.firstPeerMessage ??= peer;
+        searchParts.push(peer.text);
       }
       continue;
     }
@@ -265,12 +278,14 @@ export function parseSession(text: string, filePath: string, projectDir: string,
       info.promptCount++;
       info.firstPrompt ??= c.text;
       info.lastPrompt = c.text;
+      searchParts.push(c.text);
     } else if (c.kind === 'command') {
       firstCommand ??= c.text;
     }
   }
 
   info.assistantCount = assistantIds.size;
+  info.searchText = searchParts.join('\n');
   if (!info.lastPrompt && lastPromptRecord) {
     info.lastPrompt = lastPromptRecord;
   }

@@ -79,6 +79,29 @@ test('agent-team sessions: peer messages counted, title disambiguated, shown in 
   assert.equal(parseSession(jsonl(peer, { type: 'agent-name', agentName: 'A' }, { type: 'custom-title', customTitle: 'Mine' }), 'f', 'p', 'id').title, 'Mine');
 });
 
+test('searchText holds prompts, peer messages and replies but not tool I/O or thinking', () => {
+  const s = parseSession(
+    jsonl(
+      user('<system-reminder>secret reminder</system-reminder>Find the flaky test'),
+      asst('m1', [{ type: 'thinking', thinking: 'private musing' }]),
+      asst('m1', [{ type: 'tool_use', id: 't1', name: 'Grep', input: { pattern: 'toolinput' } }]),
+      user([{ type: 'tool_result', tool_use_id: 't1', content: 'tooloutput' }]),
+      asst('m2', [{ type: 'text', text: 'The culprit is a race in setup.' }]),
+      user('<cross-session-message from-name="Lead">Peer note here</cross-session-message>', { isMeta: true }),
+      user('sidechain words', { isSidechain: true }),
+    ),
+    'f',
+    'p',
+    'id',
+  );
+  assert.match(s.searchText, /Find the flaky test/);
+  assert.match(s.searchText, /race in setup/);
+  assert.match(s.searchText, /Peer note here/);
+  for (const absent of ['secret reminder', 'private musing', 'toolinput', 'tooloutput', 'sidechain']) {
+    assert.ok(!s.searchText.includes(absent), absent);
+  }
+});
+
 test('HEAD branch is ignored', () => {
   assert.equal(parseSession(jsonl(user('hi', { gitBranch: 'HEAD' })), 'f', 'p', 'id').gitBranch, undefined);
 });

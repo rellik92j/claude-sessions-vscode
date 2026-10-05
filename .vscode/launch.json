@@ -2,12 +2,15 @@
   "version": "0.2.0",
   "configurations": [
     {
+      // VS Code loads the esbuild bundle (package.json "main": dist/extension.js), so build that, not out/.
+      // The bundle has a source map, so breakpoints set in src/*.ts bind.
       "name": "Run Extension",
       "type": "extensionHost",
       "request": "launch",
       "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
-      "outFiles": ["${workspaceFolder}/out/**/*.js"],
-      "preLaunchTask": "npm: compile"
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "sourceMaps": true,
+      "preLaunchTask": "npm: bundle"
     }
   ]
 }
