@@ -1,45 +1,116 @@
 # Claude Sessions
 
-A VS Code sidebar that lists all of your Claude Code sessions, so you can browse, search, read, and resume them.
+**Find, read and pick up any Claude Code session without leaving VS Code.**
 
-It reads the session logs Claude Code writes to `~/.claude/projects/<project>/<session-id>.jsonl` (or `$CLAUDE_CONFIG_DIR/projects`). Nothing is uploaded anywhere.
+[Claude Code](https://claude.com/claude-code) saves every conversation you have with it, but finding an old one means scrolling through `claude --resume` and guessing from the first line. Claude Sessions adds a sidebar that shows all of your sessions across every project. You can search everything you and Claude said, read any conversation as a chat transcript, and resume it in one click.
 
-## Features
+![The Claude Sessions sidebar next to a transcript](docs/images/overview.png)
 
-- **Sessions sidebar**: a card for each session with its title, latest prompt, time, branch, prompt count, agent and PR badges. A green pulsing dot marks sessions that were active in the last few minutes.
-  - Instant search box (press `/`), with matches highlighted. Searches card details and the full conversation text (prompts and Claude's replies, not tool output); sessions matched in the transcript show the matching passage. All words must match (anywhere, case-insensitive); `"exact phrase"` matches the phrase, `-word` or `-"some phrase"` excludes sessions containing it, and `a OR b` matches either.
-  - **Projects / Recent** toggle to group by project (each with its own colored avatar) or by date (Today, Yesterday, Previous 7 Days, …).
-  - **Workspace** filter: show only sessions started in the folders open in this window.
-  - Hover a card for quick actions: ▶ resume, continue in a new session, open in Claude Code chat, read transcript, copy ID. Right-click for more (copy resume command, raw JSONL, PR, open project folder).
-  - Keyboard: ↑/↓ to move, Enter to read the transcript, Ctrl+Enter to resume.
-- **Transcript view**: a chat-style page. Your prompts are on the right, Claude's replies on the left with markdown, tables and syntax-highlighted code (with copy buttons). Each tool call is a compact row with a ✓/✗ status that expands to show its input and output, and edits show a red/green diff. Includes day separators, a toggle to hide tool calls, and a jump-to-latest button. Opened from a search, it highlights the search words and starts at the first match, with a bar to step through matches (F3 / Shift+F3, Esc to clear). The **Search Sessions…** command searches transcripts too.
-  - Transcripts open in one shared preview tab that the next one you open replaces, like VS Code preview editors, so tabs don't pile up. Double-click a session (or use **Keep open** in the transcript, or *Open Transcript in New Tab* from the right-click menu) to give it its own tab.
-- **Resume in Claude Code terminal**: opens the Claude Code CLI (`claude --resume <id>`) in a terminal tab beside your editor, in the session's folder, with the Claude logo, like the Claude Code extension's *Open in Terminal*. Resuming a session that is already open focuses its existing terminal.
-- **Continue in New Session**: starts a fresh Claude Code CLI session in the same terminal style, whose first message is a handoff of where the old one left off: your last request, Claude's last reply, the project files it edited and read, open to-dos, the current `git status`, and the path of the old transcript. It ends by asking Claude to summarise and wait, because the CLI sends it straight away. Files changed through shell commands rather than edit tools only show up in the `git status` part.
-- **Open in Claude Code Chat**: reopens the session in the Claude Code extension's chat tab.
-- Everything follows your VS Code color theme (dark, light, high contrast) and auto-refreshes when session logs change.
-- Agent-team sessions (named like "Project Lead") are titled with what the session worked on, and messages from other sessions show in the transcript.
+## What you can do with it
+
+### Browse every session in one place
+
+The sidebar shows a card for each session with its title, your latest prompt, when it happened, the git branch, how many prompts it has, and badges for subagents and pull requests. A pulsing green dot marks sessions that were active in the last few minutes.
+
+- **Projects** groups sessions by folder, and each project gets its own colored avatar. **Recent** groups them by date (Today, Yesterday, Previous 7 Days, and so on).
+- **Workspace** filter: show only the sessions started in the folders you have open in this window.
+- Hover a card for quick actions: resume, continue in a new session, open in Claude Code chat, read the transcript, or copy the session ID. Right-click for more.
+
+### Search everything you and Claude said
+
+![Searching sessions, with the matching passage shown under each card](docs/images/search.png)
+
+Press `/` to search. The search covers the card details and the full conversation: your prompts and Claude's replies, but not tool output. When a session matches inside its conversation, its card shows the matching passage.
+
+| Type | To find |
+| --- | --- |
+| `auth bug` | sessions containing both words, anywhere, in any case |
+| `"race condition"` | the exact phrase |
+| `-flaky` or `-"some phrase"` | sessions that *don't* contain it |
+| `redis OR postgres` | sessions containing either word |
+
+### Read a session as a chat
+
+![A transcript with markdown, a code block and an expanded edit diff](docs/images/transcript.png)
+
+Click a session to open its transcript. Your prompts are on the right and Claude's replies are on the left, with markdown, tables and syntax-highlighted code that you can copy.
+
+- Each tool call is a compact row with a ✓ or ✗. Click it to see the input and output. File edits show as a red/green diff.
+- Hide tool calls to read just the conversation, or jump straight to the latest message.
+- If you opened the transcript from a search, your search words are highlighted and it starts at the first match. Step through matches with F3 / Shift+F3.
+- Transcripts open in a single preview tab that the next one replaces, so tabs don't pile up. Double-click a session, or click **Keep open**, to give it a tab of its own.
+
+### Pick up where you left off
+
+![Resuming a session in a Claude Code terminal beside the editor](docs/images/resume.png)
+
+- **Resume** (▶) opens `claude --resume <id>` in a terminal tab beside your editor, in the session's project folder. If the session is already open, its terminal is focused instead.
+- **Continue in New Session** (⮕) starts a fresh session with a handoff of where the old one stopped. The handoff includes your last request, Claude's last reply, the files it edited and read, any open to-dos, the current `git status`, and the path to the old transcript. Claude is asked to summarize and wait for your instruction before changing anything. Use this when a session has grown too long to keep working in.
+- **Open in Claude Code Chat** reopens the session in the chat panel of the official Claude Code extension, if you have it installed.
+
+The sidebar refreshes on its own as sessions change, and everything follows your VS Code color theme.
+
+## Install
+
+You need **VS Code 1.90 or newer**. To use Resume and Continue in New Session, you also need the **[Claude Code CLI](https://docs.claude.com/en/docs/claude-code/setup)** installed, so that `claude` runs in a terminal.
+
+Claude Sessions isn't on the VS Code Marketplace yet. To install it:
+
+1. Download the latest `claude-sessions-<version>.vsix` from the [Releases page](https://github.com/rellik92j/claude-sessions-vscode/releases/latest).
+2. In VS Code, open the Extensions view, click the `…` menu at the top, and choose **Install from VSIX…**. Then pick the file you downloaded.
+
+   Or, from a terminal:
+
+   ```sh
+   code --install-extension claude-sessions-0.2.4.vsix
+   ```
+
+3. Click the **Claude Sessions** icon in the Activity Bar.
+
+To update, install the newer `.vsix` the same way.
+
+## Privacy
+
+Claude Sessions only reads the session logs that Claude Code already keeps on your machine, in `~/.claude/projects` (or `$CLAUDE_CONFIG_DIR/projects` if you set it). It sends nothing over the network, and it never changes or deletes your logs.
+
+## Keyboard shortcuts
+
+In the sidebar:
+
+| Key | Action |
+| --- | --- |
+| `/` | Focus search |
+| ↑ / ↓ | Move between sessions |
+| Enter | Open transcript |
+| Ctrl+Enter | Resume |
+
+In a transcript: F3 / Shift+F3 step through search matches, and Esc clears them.
+
+The **Claude Sessions: Search Sessions…** command in the Command Palette searches transcripts too.
 
 ## Settings
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `claudeSessions.projectsDir` | `""` | Folder with session logs. Empty = `$CLAUDE_CONFIG_DIR/projects` or `~/.claude/projects`. |
-| `claudeSessions.groupBy` | `project` | `project` or `date`. |
+| `claudeSessions.projectsDir` | `""` | Folder with session logs. Empty means `$CLAUDE_CONFIG_DIR/projects` or `~/.claude/projects`. |
+| `claudeSessions.groupBy` | `project` | Group sessions by `project` or `date`. |
 | `claudeSessions.currentWorkspaceOnly` | `false` | Only show sessions from the open workspace folders. |
 | `claudeSessions.hideEmptySessions` | `true` | Hide sessions with no prompts or replies. |
-| `claudeSessions.claudeCommand` | `claude` | Command used when resuming. |
-| `claudeSessions.terminalLocation` | `editor` | `editor` (tab beside the editor) or `panel` (bottom terminal panel). |
+| `claudeSessions.claudeCommand` | `claude` | Command used to launch Claude Code when resuming. |
+| `claudeSessions.terminalLocation` | `editor` | Open the terminal as an `editor` tab or in the bottom `panel`. |
 | `claudeSessions.showThinking` | `false` | Show Claude's thinking blocks in transcripts. |
-| `claudeSessions.reuseTranscriptTab` | `true` | Reuse one preview tab for transcripts; when off, every transcript gets its own tab. |
+| `claudeSessions.reuseTranscriptTab` | `true` | Reuse one preview tab for transcripts. When off, every transcript gets its own tab. |
 
 ## Development
 
 ```sh
 npm install
-npm test          # compile + unit tests (+ a smoke test against your real ~/.claude/projects)
-npm run package   # builds claude-sessions-<version>.vsix
-code --install-extension claude-sessions-0.2.1.vsix
+npm test          # compile, bundle and run unit tests (plus a smoke test against your real ~/.claude/projects)
+npm run package   # build claude-sessions-<version>.vsix
 ```
 
-Press F5 in VS Code with this folder open to run the extension in a development host.
+Press F5 with this folder open to run the extension in a development host.
+
+## License
+
+[MIT](LICENSE)
