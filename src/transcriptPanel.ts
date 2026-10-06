@@ -2,10 +2,11 @@ import { randomBytes } from 'crypto';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { escapeHtml, formatDateTime } from './format';
+import { escapeHtml, formatDateTime, formatTokens, formatUsd } from './format';
 import { renderMarkdown } from './markdown';
-import { projectPath } from './model';
+import { projectPath, SessionModel } from './model';
 import { parseTranscript, SessionInfo, TranscriptEntry, TranscriptPart } from './sessionParser';
+import { UsageSummary } from './usage';
 
 type ToolPart = Extract<TranscriptPart, { kind: 'tool_use' }>;
 
@@ -31,6 +32,7 @@ export class TranscriptPanels {
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly hasClaudeCode: () => boolean,
+    private readonly model: SessionModel,
   ) {}
 
   /**
@@ -88,6 +90,7 @@ export class TranscriptPanels {
       switch (msg?.command) {
         case 'resume':
         case 'continueInNewSession':
+        case 'continueInNewSessionWithModel':
         case 'openInClaudeCode':
         case 'copyId':
         case 'openRawFile':
@@ -101,6 +104,9 @@ export class TranscriptPanels {
           }
           break;
         case 'refresh':
+          // Re-read the log first so the stats are current too.
+          await this.model.reload();
+          tab.session = this.model.find(tab.session.id) ?? tab.session;
           this.render(tab);
           break;
         case 'keepOpen':
@@ -345,6 +351,112 @@ function renderEntry(e: TranscriptEntry, showThinking: boolean): string {
     </div>`;
 }
 
+const CONTEXT_WARN = 0.8;
+
+/** Context, prompt cache, cost and token tiles, with the cost broken down by token type underneath. */
+function renderStats(u: UsageSummary): string {
+  const tiles: string[] = [];
+  if (u.context) {
+    const fill = u.context.tokens / u.context.limit;
+    tiles.push(`
+      <div class="stat${fill >= CONTEXT_WARN ? ' warn' : ''}">
+        <div class="stat-label"><i class="codicon codicon-pie-chart"></i>Context</div>
+        <div class="stat-value">${formatTokens(u.context.tokens)}<span> / ${formatTokens(u.context.limit)}</span></div>
+        <div class="meter"><span data-fill="${fill.toFixed(4)}"></span></div>
+        <div class="stat-sub">${Math.round(fill * 100)}% full at the last request</div>
+      </div>`);
+  }
+  if (u.cache) {
+    const expires = u.cache.lastRequest + u.cache.ttlMs;
+    const ttl = u.cache.ttlMs >= 3_600_000 ? '1-hour' : '5-minute';
+    tiles.push(`
+      <div class="stat cache" data-expires="${expires}" title="Claude Code caches the conversation so the next request reads it at a fraction of the input price. Each request refreshes the ${ttl} timer; after it lapses, resuming writes the whole context to the cache again.">
+        <div class="stat-label"><i class="codicon codicon-watch"></i>Prompt cache</div>
+        <div class="stat-value" data-cache-value></div>
+        <div class="stat-sub"><span data-cache-sub></span> · ${ttl} cache</div>
+      </div>`);
+  }
+  tiles.push(`
+    <div class="stat">
+      <div class="stat-label"><i class="codicon codicon-credit-card"></i>Cost at API prices</div>
+      <div class="stat-value">${formatUsd(u.cost)}</div>
+      <div class="stat-sub">${u.requests} request${u.requests === 1 ? '' : 's'}${u.subagentCost >= 0.01 ? ` · ${formatUsd(u.subagentCost)} subagents` : ''}</div>
+    </div>`);
+  const t = u.tokens;
+  const input = t.input + t.cacheWrite5m + t.cacheWrite1h + t.cacheRead;
+  tiles.push(`
+    <div class="stat">
+      <div class="stat-label"><i class="codicon codicon-symbol-numeric"></i>Tokens</div>
+      <div class="stat-value">${formatTokens(input)}<span> in</span> · ${formatTokens(t.output)}<span> out</span></div>
+      <div class="stat-sub">${input ? Math.round((t.cacheRead / input) * 100) : 0}% of input read from cache</div>
+    </div>`);
+
+  const rows: [string, number | undefined, number][] = [
+    ['Input', t.input, u.costs.input],
+    ['Cache writes, 5 minutes', t.cacheWrite5m, u.costs.cacheWrite5m],
+    ['Cache writes, 1 hour', t.cacheWrite1h, u.costs.cacheWrite1h],
+    ['Cache reads', t.cacheRead, u.costs.cacheRead],
+    ['Output', t.output, u.costs.output],
+    ['Web searches', undefined, u.costs.webSearch],
+  ];
+  const table = rows
+    .filter(([, tokens, cost]) => (tokens ?? 0) > 0 || cost > 0)
+    .map(
+      ([label, tokens, cost]) =>
+        `<tr><td>${label}</td><td>${tokens === undefined ? '' : tokens.toLocaleString()}</td><td>${formatUsd(cost)}</td></tr>`,
+    )
+    .join('');
+  const unpriced = u.unpriced.length
+    ? ` No price is known for ${u.unpriced.map(escapeHtml).join(', ')}, so its tokens are counted but not costed.`
+    : '';
+  return `
+    <div class="stats">${tiles.join('')}</div>
+    <details class="cost-breakdown">
+      <summary>Cost breakdown</summary>
+      <table>
+        <thead><tr><th></th><th>Tokens</th><th>Cost</th></tr></thead>
+        <tbody>${table}</tbody>
+        <tfoot><tr><td>Total</td><td></td><td>${formatUsd(u.cost)}</td></tr></tfoot>
+      </table>
+      <p class="note">Estimated from the token counts in the session log at Claude API list prices, subagents included. On a Pro or Max plan you aren't billed per token, so this shows what the session would cost through the API.${unpriced}</p>
+    </details>`;
+}
+
+/**
+ * One-line version of the stats for the sticky top bar, shown once the full tiles scroll out of view.
+ * Clicking it goes back to the top, where the tiles and the cost breakdown are.
+ */
+function renderStatsStrip(session: SessionInfo, toolCount: number): string {
+  const u = session.usage;
+  const items: string[] = [];
+  if (session.model) {
+    items.push(`<span><i class="codicon codicon-sparkle"></i>${escapeHtml(session.model)}${u?.effort ? ` · ${escapeHtml(u.effort)}` : ''}</span>`);
+  }
+  if (u?.context) {
+    const fill = u.context.tokens / u.context.limit;
+    items.push(
+      `<span class="${fill >= CONTEXT_WARN ? 'warn' : ''}" title="Context window at the last request"><i class="codicon codicon-pie-chart"></i>${formatTokens(u.context.tokens)} / ${formatTokens(u.context.limit)} · ${Math.round(fill * 100)}%</span>`,
+    );
+  }
+  if (u?.cache) {
+    items.push(`<span class="cache" data-expires="${u.cache.lastRequest + u.cache.ttlMs}" title="Prompt cache"><i class="codicon codicon-watch"></i><span data-cache-short></span></span>`);
+  }
+  if (u) {
+    const t = u.tokens;
+    items.push(`<span title="Cost at Claude API prices"><i class="codicon codicon-credit-card"></i>${formatUsd(u.cost)}</span>`);
+    items.push(
+      `<span title="Tokens in and out"><i class="codicon codicon-symbol-numeric"></i>${formatTokens(t.input + t.cacheWrite5m + t.cacheWrite1h + t.cacheRead)} in · ${formatTokens(t.output)} out</span>`,
+    );
+  }
+  if (!items.length && !toolCount) {
+    return '';
+  }
+  const toggle = toolCount
+    ? `<label class="switch"><input type="checkbox" data-tools-toggle><span class="track"><span class="thumb"></span></span>Tool calls</label>`
+    : '';
+  return `<div class="topbar-stats"><button class="strip-stats" id="to-top" title="Back to the top">${items.join('')}</button>${toggle}</div>`;
+}
+
 export function buildHtml(session: SessionInfo, entries: TranscriptEntry[], o: HtmlOptions): string {
   const nonce = randomBytes(16).toString('base64');
   const proj = projectPath(session);
@@ -354,7 +466,9 @@ export function buildHtml(session: SessionInfo, entries: TranscriptEntry[], o: H
     session.agentName ? `<span class="chip agent"><i class="codicon codicon-hubot"></i>${escapeHtml(session.agentName)}</span>` : '',
     `<span class="chip" title="Started ${escapeHtml(formatDateTime(session.startTime))}"><i class="codicon codicon-calendar"></i>${escapeHtml(formatDateTime(session.lastTime))}</span>`,
     `<span class="chip"><i class="codicon codicon-comment"></i>${session.promptCount} prompt${session.promptCount === 1 ? '' : 's'}</span>`,
-    session.model ? `<span class="chip"><i class="codicon codicon-sparkle"></i>${escapeHtml(session.model)}</span>` : '',
+    session.model
+      ? `<span class="chip"${session.usage?.effort ? ' title="Model and effort of the last request"' : ''}><i class="codicon codicon-sparkle"></i>${escapeHtml(session.model)}${session.usage?.effort ? ` · ${escapeHtml(session.usage.effort)}` : ''}</span>`
+      : '',
     session.prUrl
       ? `<button class="chip pr" data-cmd="openPr" title="${escapeHtml(session.prUrl)}"><i class="codicon codicon-git-pull-request"></i>${escapeHtml(session.prRepository ?? 'PR')}#${session.prNumber ?? ''}</button>`
       : '',
@@ -389,19 +503,22 @@ export function buildHtml(session: SessionInfo, entries: TranscriptEntry[], o: H
   <div class="topbar-actions">
     <button class="btn primary" data-cmd="resume" title="Resume this session with the Claude Code CLI"><i class="codicon codicon-play"></i><span>Resume</span></button>
     <button class="btn" data-cmd="continueInNewSession" title="Start a new Claude Code CLI session with a handoff of where this one left off"><i class="codicon codicon-arrow-circle-right"></i><span>Continue in new session</span></button>
+    <button class="icon-btn" data-cmd="continueInNewSessionWithModel" title="Continue in a new session with a different model or effort…"><i class="codicon codicon-chevron-down"></i></button>
     ${o.hasClaudeCode ? '<button class="btn" data-cmd="openInClaudeCode" title="Open in the Claude Code chat"><i class="codicon codicon-comment-discussion"></i><span>Open in chat</span></button>' : ''}
     ${o.preview ? '<button class="btn" data-cmd="keepOpen" title="This tab is reused for the next transcript you open. Keep this one in its own tab."><i class="codicon codicon-pinned"></i><span>Keep open</span></button>' : ''}
     <button class="icon-btn" data-cmd="refresh" title="Reload"><i class="codicon codicon-refresh"></i></button>
     <button class="icon-btn" data-cmd="copyId" title="Copy session ID"><i class="codicon codicon-copy"></i></button>
     <button class="icon-btn" data-cmd="openRawFile" title="Open raw JSONL"><i class="codicon codicon-json"></i></button>
   </div>
+  ${renderStatsStrip(session, toolCount)}
 </nav>
 <header class="hero">
   <h1>${escapeHtml(session.title)}</h1>
   <div class="chips">${chips}</div>
+  ${session.usage ? renderStats(session.usage) : ''}
   ${
     toolCount
-      ? `<label class="switch"><input type="checkbox" id="show-tools" checked><span class="track"><span class="thumb"></span></span>Show ${toolCount} tool call${toolCount === 1 ? '' : 's'}</label>`
+      ? `<label class="switch"><input type="checkbox" id="show-tools" data-tools-toggle checked><span class="track"><span class="thumb"></span></span>Show ${toolCount} tool call${toolCount === 1 ? '' : 's'}</label>`
       : ''
   }
 </header>

@@ -19,17 +19,20 @@
     }
   });
 
-  const toggle = document.getElementById('show-tools');
-  const applyTools = () => document.body.classList.toggle('hide-tools', !!toggle && !toggle.checked);
-  if (toggle) {
-    toggle.checked = saved.showTools !== false;
-    toggle.addEventListener('change', () => {
-      vscode.setState({ ...saved, showTools: toggle.checked });
-      saved.showTools = toggle.checked;
-      applyTools();
-    });
-    applyTools();
-  }
+  // The hero and the sticky top bar each have a tool-call switch; they stay in step.
+  const toggles = Array.from(document.querySelectorAll('[data-tools-toggle]'));
+  const applyTools = (show) => {
+    toggles.forEach((t) => (t.checked = show));
+    document.body.classList.toggle('hide-tools', toggles.length > 0 && !show);
+  };
+  toggles.forEach((t) =>
+    t.addEventListener('change', () => {
+      saved.showTools = t.checked;
+      vscode.setState({ ...saved });
+      applyTools(t.checked);
+    }),
+  );
+  applyTools(saved.showTools !== false);
 
   // Compact top bar gets a shadow once the hero scrolls away; the jump button shows when far from the bottom.
   const jump = document.getElementById('jump');
@@ -41,6 +44,50 @@
   };
   window.addEventListener('scroll', onScroll, { passive: true });
   jump.addEventListener('click', () => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' }));
+
+  // ---------- stats ----------
+
+  // Widths are set here because the page's CSP doesn't allow inline style attributes.
+  document.querySelectorAll('.meter [data-fill]').forEach((el) => {
+    el.style.width = `${Math.min(100, Number(el.dataset.fill) * 100)}%`;
+  });
+
+  function duration(ms) {
+    const min = Math.max(1, Math.round(ms / 60000));
+    if (min < 60) return `${min}m`;
+    const hr = Math.round(min / 60);
+    return hr < 48 ? `${hr}h` : `${Math.round(hr / 24)}d`;
+  }
+
+  /** The prompt cache tile and its top-bar twin count down while the cache is warm, then say how long ago it expired. */
+  const cacheTile = document.querySelector('.stat.cache');
+  const cacheShort = document.querySelector('.topbar-stats .cache');
+  function updateCache() {
+    const el = cacheTile || cacheShort;
+    if (!el) return;
+    const left = Number(el.dataset.expires) - Date.now();
+    const warm = left > 0;
+    if (cacheTile) {
+      cacheTile.classList.toggle('warm', warm);
+      cacheTile.querySelector('[data-cache-value]').textContent = warm ? `${duration(left)} left` : 'Expired';
+      cacheTile.querySelector('[data-cache-sub]').textContent = warm ? 'Warm' : `${duration(-left)} ago`;
+    }
+    if (cacheShort) {
+      cacheShort.classList.toggle('warm', warm);
+      cacheShort.querySelector('[data-cache-short]').textContent = warm ? `cache ${duration(left)} left` : 'cache expired';
+    }
+  }
+  updateCache();
+  setInterval(updateCache, 30_000);
+
+  // The compact stats appear in the top bar once the title and stats tiles have scrolled away.
+  const hero = document.querySelector('.hero');
+  if (hero && document.querySelector('.topbar-stats')) {
+    new IntersectionObserver(([entry]) => document.body.classList.toggle('hero-hidden', !entry.isIntersecting), {
+      rootMargin: `-${document.querySelector('.topbar').offsetHeight}px 0px 0px 0px`,
+    }).observe(hero);
+    document.getElementById('to-top').addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+  }
 
   // ---------- search highlights (when opened from a search) ----------
 

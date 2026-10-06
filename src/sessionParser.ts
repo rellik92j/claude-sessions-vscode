@@ -1,6 +1,8 @@
 // Pure parsing of Claude Code session logs (~/.claude/projects/<project>/<sessionId>.jsonl).
 // No VS Code imports here so it can be unit-tested with plain Node.
 
+import { UsageCollector, UsageSummary } from './usage';
+
 export type TitleSource = 'custom' | 'ai' | 'prompt' | 'command' | 'none';
 
 export interface SessionInfo {
@@ -32,6 +34,8 @@ export interface SessionInfo {
   model?: string;
   /** Prompts, peer messages and Claude's replies (no tool I/O or thinking), for full-text search. */
   searchText: string;
+  /** Tokens, cost, context and cache state; undefined when the log records no API usage. */
+  usage?: UsageSummary;
 }
 
 export type TranscriptPart =
@@ -159,8 +163,17 @@ export function* records(text: string): Generator<any> {
   }
 }
 
-/** Extracts summary metadata for one session log. */
-export function parseSession(text: string, filePath: string, projectDir: string, id: string): SessionInfo {
+/**
+ * Extracts summary metadata for one session log. `subagentLogs` are the logs of its subagents
+ * (`<sessionId>/subagents/*.jsonl`), which only add to its usage.
+ */
+export function parseSession(
+  text: string,
+  filePath: string,
+  projectDir: string,
+  id: string,
+  subagentLogs: string[] = [],
+): SessionInfo {
   const info: SessionInfo = {
     id,
     filePath,
@@ -178,6 +191,7 @@ export function parseSession(text: string, filePath: string, projectDir: string,
   let firstCommand: string | undefined;
   let lastPromptRecord: string | undefined;
   const assistantIds = new Set<string>();
+  const usage = new UsageCollector();
 
   for (const r of records(text)) {
     if (!r || typeof r !== 'object') {
@@ -225,6 +239,9 @@ export function parseSession(text: string, filePath: string, projectDir: string,
     }
 
     if (r.isSidechain) {
+      if (r.type === 'assistant') {
+        usage.add(r, true);
+      }
       continue;
     }
     if (!info.cwd && typeof r.cwd === 'string') {
@@ -243,6 +260,7 @@ export function parseSession(text: string, filePath: string, projectDir: string,
     }
 
     if (r.type === 'assistant') {
+      usage.add(r, false);
       const msgId = r.message?.id ?? r.uuid;
       if (typeof msgId === 'string') {
         assistantIds.add(msgId);
@@ -285,6 +303,14 @@ export function parseSession(text: string, filePath: string, projectDir: string,
     }
   }
 
+  for (const log of subagentLogs) {
+    for (const r of records(log)) {
+      if (r?.type === 'assistant') {
+        usage.add(r, true);
+      }
+    }
+  }
+  info.usage = usage.summary();
   info.assistantCount = assistantIds.size;
   info.searchText = searchParts.join('\n');
   if (!info.lastPrompt && lastPromptRecord) {

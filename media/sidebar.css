@@ -348,6 +348,8 @@ time {
 .tag.project { --hue: 210; color: hsl(var(--hue) 70% 70%); background: hsl(var(--hue) 55% 50% / 0.14); }
 body.vscode-light .tag.project { color: hsl(var(--hue) 60% 35%); }
 .tag.project .swatch { width: 6px; height: 6px; border-radius: 2px; background: currentColor; margin-right: 2px; }
+.tag.ctx.warn { color: var(--vscode-charts-yellow, #cca700); background: color-mix(in srgb, var(--vscode-charts-yellow, #cca700) 15%, transparent); }
+.tag.cache { color: var(--vscode-charts-green, #89d185); background: color-mix(in srgb, var(--vscode-charts-green, #89d185) 14%, transparent); }
 
 .card-actions {
   position: absolute;
