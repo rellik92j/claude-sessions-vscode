@@ -66,6 +66,10 @@ Cards keep it short. Each one shows the cost, plus two badges that only appear w
 
 The numbers are worked out on your machine from the token counts in the session logs, using Claude API list prices. They leave out the few small background requests Claude Code doesn't log, such as naming the session.
 
+### See all your sessions at a glance
+
+Click the dashboard button at the top of the sidebar, or run **Claude Sessions: Open Overview**, to open a summary in an editor tab. For the last 7, 30 or 90 days, or all time, it shows the total cost, sessions, prompts and active days, a chart of cost per day, each project's and each model's share, and the most expensive sessions. Use the **Projects** filter to narrow it to one or more projects, or click a project's name in the table to show just that one. Hover a bar for that day's numbers, and click a session to read its transcript. Cost is counted on the day each request was made, so a session that ran over several days is split across them. The overview follows the sidebar's **Workspace** filter.
+
 ### Pick up where you left off
 
 ![Resuming a session in a Claude Code terminal beside the editor](docs/images/resume.png)

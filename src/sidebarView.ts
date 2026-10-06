@@ -1,7 +1,7 @@
 import { randomBytes } from 'crypto';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { normalizePath } from './format';
+import { hueFor } from './format';
 import { GroupBy, projectPath, SessionModel } from './model';
 import { parseQuery } from './query';
 import { SessionInfo } from './sessionParser';
@@ -30,14 +30,6 @@ export interface CardData {
   context?: number;
   /** When the prompt cache expires (ms since epoch). */
   cacheExpires?: number;
-}
-
-export function hueFor(text: string): number {
-  let h = 0;
-  for (const ch of normalizePath(text)) {
-    h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  }
-  return h % 360;
 }
 
 export function toCard(s: SessionInfo): CardData {

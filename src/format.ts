@@ -73,6 +73,15 @@ export function isInside(child: string, parent: string, platform: NodeJS.Platfor
   return c === p || c.startsWith(p + sep);
 }
 
+/** A stable hue (0–359) for a project folder, so the project keeps its color in every view. */
+export function hueFor(text: string): number {
+  let h = 0;
+  for (const ch of normalizePath(text)) {
+    h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  }
+  return h % 360;
+}
+
 export function escapeHtml(text: string): string {
   return text
     .replace(/&/g, '&amp;')
