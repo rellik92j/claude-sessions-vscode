@@ -78,8 +78,9 @@ body.scrolled .topbar-title { opacity: 1; transform: none; }
   padding: 4px 24px 5px;
   border: none;
   border-bottom: 1px solid var(--hairline);
-  background: color-mix(in srgb, var(--vscode-editor-background) 88%, transparent);
-  backdrop-filter: blur(10px);
+  /* Solid: a backdrop-filter inside the top bar's own backdrop-filter doesn't blur, so a see-through background
+     let the conversation show through the text. */
+  background: var(--vscode-editor-background);
   box-shadow: 0 4px 12px -8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.5));
   color: var(--muted);
   font-size: 12px;
@@ -111,7 +112,7 @@ body.scrolled .topbar-title { opacity: 1; transform: none; }
 .strip-stats:hover { color: var(--vscode-foreground); }
 .topbar-stats .switch { margin-top: 0; flex: none; }
 body.hero-hidden .topbar-stats { opacity: 1; pointer-events: auto; transform: none; }
-body.hero-hidden .topbar { box-shadow: none; }
+body.hero-hidden .topbar { box-shadow: none; background: var(--vscode-editor-background); }
 
 .btn {
   display: inline-flex;
