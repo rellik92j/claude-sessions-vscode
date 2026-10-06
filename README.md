@@ -2,7 +2,7 @@
 
 **Find, read and pick up any Claude Code session without leaving VS Code.**
 
-[Claude Code](https://claude.com/claude-code) saves every conversation you have with it, but finding an old one means scrolling through `claude --resume` and guessing from the first line. Claude Sessions adds a sidebar that shows all of your sessions across every project. You can search everything you and Claude said, read any conversation as a chat transcript, and resume it in one click.
+[Claude Code](https://claude.com/claude-code) saves every conversation you have with it, but finding an old one means scrolling through `claude --resume` and guessing from the first line. Claude Sessions adds a sidebar that shows all of your sessions across every project. You can search everything you and Claude said, read any conversation as a chat transcript, see what each session used and cost, and resume it in one click.
 
 ![The Claude Sessions sidebar next to a transcript](docs/images/overview.png)
 
@@ -12,7 +12,7 @@
 
 The sidebar shows a card for each session with its title, your latest prompt, when it happened, the git branch, how many prompts it has, and badges for subagents and pull requests. A pulsing green dot marks sessions that were active in the last few minutes.
 
-Each card also shows what the session cost at Claude API prices. Two more badges appear only when they're useful: how full the context window is once it passes 50%, and a countdown while the prompt cache is still warm, when resuming is cheapest.
+Each card also shows what the session cost, plus a couple of [usage badges](#see-what-a-session-used-and-cost) when they're worth knowing about.
 
 - **Projects** groups sessions by folder, and each project gets its own colored avatar. **Recent** groups them by date (Today, Yesterday, Previous 7 Days, and so on).
 - **Workspace** filter: show only the sessions started in the folders you have open in this window.
@@ -37,18 +37,42 @@ Press `/` to search. The search covers the card details and the full conversatio
 
 Click a session to open its transcript. Your prompts are on the right and Claude's replies are on the left, with markdown, tables and syntax-highlighted code that you can copy.
 
-- Above the conversation, usage stats like those in Claude Code's status line: how full the context window is, whether the prompt cache is still warm and for how long, the token counts, and the cost at Claude API prices, subagents included. Expand **Cost breakdown** to see the cost of each token type. On a Pro or Max plan you aren't billed per token, so the cost shows what the session would cost through the API.
 - Each tool call is a compact row with a ✓ or ✗. Click it to see the input and output. File edits show as a red/green diff.
 - Hide tool calls to read just the conversation, or jump straight to the latest message.
 - If you opened the transcript from a search, your search words are highlighted and it starts at the first match. Step through matches with F3 / Shift+F3.
 - Transcripts open in a single preview tab that the next one replaces, so tabs don't pile up. Double-click a session, or click **Keep open**, to give it a tab of its own.
+
+### See what a session used and cost
+
+![Usage stats above a transcript: context, prompt cache, cost and tokens, with the cost breakdown expanded](docs/images/stats.png)
+
+The top of each transcript shows the numbers Claude Code's status line shows while a session runs, so you can check them for any session, long after it ended:
+
+| Stat | What it tells you |
+| --- | --- |
+| **Context** | How full the context window was at the last request. Once it's filling up, continuing in a new session gives Claude room again. |
+| **Prompt cache** | Whether the conversation is still cached, with a countdown, and whether it's a 1-hour or 5-minute cache. Resuming while it's warm reads the context at a fraction of the price. After it expires, the whole context is written to the cache again. |
+| **Cost at API prices** | What the session's tokens cost at Claude API prices, subagents included. Expand **Cost breakdown** to see each token type. On a Pro or Max plan you aren't billed per token, so this shows what the session would cost through the API. |
+| **Tokens** | Tokens in and out, and how much of the input was read from the cache. |
+
+When you scroll down into the conversation, a one-line version of the stats stays in the bar at the top, along with the switch for showing tool calls. Click it to go back to the top.
+
+![Session cards with cost, context and prompt cache badges](docs/images/cards.png)
+
+Cards keep it short. Each one shows the cost, plus two badges that only appear when they're worth acting on:
+
+- **Context**, once the window is more than half full. It turns yellow from 80%.
+- **Prompt cache countdown**, while the cache is still warm.
+
+The numbers are worked out on your machine from the token counts in the session logs, using Claude API list prices. They leave out the few small background requests Claude Code doesn't log, such as naming the session.
 
 ### Pick up where you left off
 
 ![Resuming a session in a Claude Code terminal beside the editor](docs/images/resume.png)
 
 - **Resume** (▶) opens `claude --resume <id>` in a terminal tab beside your editor, in the session's project folder. If the session is already open, its terminal is focused instead.
-- **Continue in New Session** (⮕) starts a fresh session with a handoff of where the old one stopped. The handoff includes your last request, Claude's last reply, the files it edited and read, any open to-dos, the current `git status`, and the path to the old transcript. Claude is asked to summarize and wait for your instruction before changing anything. Use this when a session has grown too long to keep working in. To use a different model or effort level than your Claude Code settings, choose **Continue in New Session with Model…** from the right-click menu, or the ⌄ button next to **Continue in new session** in a transcript.
+- **Continue in New Session** (⮕) starts a fresh session with a handoff of where the old one stopped. The handoff includes your last request, Claude's last reply, the files it edited and read, any open to-dos, the current `git status`, and the path to the old transcript. Claude is asked to summarize and wait for your instruction before changing anything. Use this when a session has grown too long to keep working in.
+- **Continue in New Session with Model…** does the same, but first asks which model and effort level the new session should use, instead of your Claude Code settings. Find it in a card's right-click menu, or click the ⌄ next to **Continue in new session** in a transcript.
 - **Open in Claude Code Chat** reopens the session in the chat panel of the official Claude Code extension, if you have it installed.
 
 The sidebar refreshes on its own as sessions change, and everything follows your VS Code color theme.
