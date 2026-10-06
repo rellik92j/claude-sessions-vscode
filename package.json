@@ -5,6 +5,10 @@
   "version": "0.2.4",
   "publisher": "local",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rellik92j/claude-sessions-vscode.git"
+  },
   "engines": {
     "vscode": "^1.90.0"
   },
