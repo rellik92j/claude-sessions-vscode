@@ -248,9 +248,11 @@ test('bundled extension activates, fills the sidebar, and renders a transcript',
     assert.equal(state.panels.length, 6, 'overview opened once');
     assert.match(overview.webview.html, /overview\.js/);
     state.panelPosts.length = 0;
-    overview.onMessage({ type: 'ready', range: 7 });
+    overview.onMessage({ type: 'ready', range: 7, scope: 'workspace' });
     const ov = state.panelPosts.filter((m) => m.type === 'state').pop();
     assert.ok(ov, 'state posted to overview');
+    assert.equal(ov.scope, 'all', 'no folder open, so the workspace scope shows all projects');
+    assert.equal(ov.hasWorkspace, false);
     assert.equal(ov.overview.range, 7);
     assert.equal(ov.overview.totals.sessions, 1);
     assert.ok(Math.abs(ov.overview.totals.cost - 0.17004) < 1e-6);
@@ -258,11 +260,23 @@ test('bundled extension activates, fills the sidebar, and renders a transcript',
     assert.deepEqual(ov.overview.models.map((m) => m.model), ['opus-5-5']);
     // Project filter: keys from allProjects; unknown ones are dropped.
     const repoKey = ov.overview.allProjects[0].key;
-    overview.onMessage({ type: 'setFilters', range: 30, projects: [repoKey, 'nowhere'] });
-    const filtered = state.panelPosts.filter((m) => m.type === 'state').pop().overview;
-    assert.equal(filtered.range, 30);
-    assert.deepEqual(filtered.filter, [repoKey]);
-    assert.equal(filtered.totals.sessions, 1);
+    overview.onMessage({ type: 'setFilters', range: 30, scope: 'pick', projects: [repoKey, 'nowhere'] });
+    const filtered = state.panelPosts.filter((m) => m.type === 'state').pop();
+    assert.equal(filtered.scope, 'pick');
+    assert.equal(filtered.overview.range, 30);
+    assert.deepEqual(filtered.overview.filter, [repoKey]);
+    assert.equal(filtered.overview.totals.sessions, 1);
+    // With a folder open, the workspace scope shows only sessions started inside it.
+    vscode.workspace.workspaceFolders = [{ uri: vscode.Uri.file(path.join(projectsDir, 'elsewhere')) }];
+    overview.onMessage({ type: 'setFilters', range: 30, scope: 'workspace' });
+    const ws = state.panelPosts.filter((m) => m.type === 'state').pop();
+    assert.equal(ws.scope, 'workspace');
+    assert.deepEqual(ws.workspaceKeys, []);
+    assert.equal(ws.overview.totals.sessions, 0);
+    vscode.workspace.workspaceFolders = [{ uri: vscode.Uri.file('C:\\repo') }];
+    overview.onMessage({ type: 'setFilters', range: 30, scope: 'workspace' });
+    assert.equal(state.panelPosts.filter((m) => m.type === 'state').pop().overview.totals.sessions, 1);
+    vscode.workspace.workspaceFolders = [];
 
     // Assets referenced by the webviews must exist on disk.
     for (const f of ['media/sidebar.js', 'media/sidebar.css', 'media/transcript.js', 'media/transcript.css', 'media/overview.js', 'media/overview.css','node_modules/@vscode/codicons/dist/codicon.css', 'node_modules/@vscode/codicons/dist/codicon.ttf']) {

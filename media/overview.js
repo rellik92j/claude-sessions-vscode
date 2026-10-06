@@ -3,8 +3,14 @@
   const vscode = acquireVsCodeApi();
   const saved = vscode.getState() || {};
   let range = saved.range ?? 30;
-  /** Keys of the projects shown; empty for all. */
+  /** Which projects are shown: those in the open workspace folders (the default), all, or a pick. */
+  let scope = ['workspace', 'all', 'pick'].includes(saved.scope) ? saved.scope : 'workspace';
+  /** Keys of the picked projects, for the 'pick' scope. */
   let projects = Array.isArray(saved.projects) ? saved.projects : [];
+  /** Order of the session list: 'recent' or 'cost'. */
+  let sessionSort = saved.sessionSort === 'cost' ? 'cost' : 'recent';
+  /** What the chart's bars are split and colored by: 'model', 'project' or 'total'. */
+  let colorBy = ['model', 'project', 'total'].includes(saved.colorBy) ? saved.colorBy : 'model';
   let menuQuery = '';
   let state = null;
 
@@ -15,6 +21,17 @@
     [0, 'All time'],
   ];
   const PROJECTS_SHOWN = 10;
+  const SESSION_SORTS = [
+    ['recent', 'Recent'],
+    ['cost', 'Most expensive'],
+  ];
+  const COLOR_BYS = [
+    ['model', 'Model'],
+    ['project', 'Project'],
+    ['total', 'Total'],
+  ];
+  /** Categorical colors; models or projects past the last one share the "Other" color. */
+  const SLOTS = 7;
 
   const app = document.getElementById('app');
   app.innerHTML = `
@@ -30,11 +47,11 @@
     </header>
     <div class="filters">
       <div class="dropdown">
-        <button class="chip" id="project-btn" aria-haspopup="true" aria-expanded="false"><i class="codicon codicon-folder"></i><span id="project-label">All projects</span><i class="codicon codicon-chevron-down"></i></button>
+        <button class="chip" id="project-btn" aria-haspopup="true" aria-expanded="false"><i class="codicon codicon-folder"></i><span id="project-label">Current workspace</span><i class="codicon codicon-chevron-down"></i></button>
         <div class="menu" id="project-menu" hidden>
+          <div class="menu-scopes" id="project-scopes"></div>
           <input id="project-q" type="text" placeholder="Find a project" spellcheck="false" aria-label="Find a project" />
           <div class="menu-items" id="project-items"></div>
-          <div class="menu-foot"><button class="link" id="project-clear">Show all projects</button></div>
         </div>
       </div>
       <div class="selected" id="selected"></div>
@@ -50,6 +67,7 @@
   const $menu = document.getElementById('project-menu');
   const $projectQ = document.getElementById('project-q');
   const $projectItems = document.getElementById('project-items');
+  const $projectScopes = document.getElementById('project-scopes');
   const $selected = document.getElementById('selected');
 
   // ---------- helpers ----------
@@ -96,6 +114,39 @@
     return 10 * p;
   }
 
+  // ---------- colors ----------
+
+  /**
+   * Color class for a model or project: its place in the extension's all-time order (so it keeps its color when the
+   * range changes), "Other" past the last slot, and hollow for a project that isn't shown at all. Only what the chart
+   * is colored by gets colors, so a project never seems to match the model that shares its color.
+   */
+  function colorOf(kind, key) {
+    if (kind !== colorBy) return 'c-x';
+    const i = state?.overview.series[kind].indexOf(key) ?? -1;
+    return i < 0 ? 'c-n' : i < SLOTS ? `c-${i + 1}` : 'c-o';
+  }
+
+  const projectName = (key) => state?.overview.allProjects.find((p) => p.key === key)?.name ?? key;
+
+  /** A bucket's cost split into colored parts, in series order (largest overall at the bottom), "Other" last. */
+  function parts(b) {
+    if (colorBy === 'total') return b.cost ? [{ key: 'total', label: 'Cost', color: 'c-t', cost: b.cost }] : [];
+    const kind = colorBy;
+    const by = kind === 'model' ? b.byModel : b.byProject;
+    const order = state.overview.series[kind];
+    const out = [];
+    let other = 0;
+    for (const [key, cost] of Object.entries(by)) {
+      const i = order.indexOf(key);
+      if (i >= 0 && i < SLOTS) out.push({ key, i, label: kind === 'model' ? key : projectName(key), color: `c-${i + 1}`, cost });
+      else other += cost;
+    }
+    out.sort((a, c) => a.i - c.i);
+    if (other > 0) out.push({ key: 'other', label: 'Other', color: 'c-o', cost: other });
+    return out;
+  }
+
   // ---------- rendering ----------
 
   function kpi(label, value, note, title) {
@@ -120,6 +171,23 @@
       </section>`;
   }
 
+  function renderLegend(o) {
+    if (colorBy === 'total') return '';
+    const seen = new Map();
+    for (const b of o.buckets) {
+      for (const p of parts(b)) {
+        const e = seen.get(p.key) ?? { ...p, cost: 0 };
+        e.cost += p.cost;
+        seen.set(p.key, e);
+      }
+    }
+    const items = [...seen.values()].sort((a, b) => (a.key === 'other') - (b.key === 'other') || a.i - b.i);
+    if (!items.length) return '';
+    return `<div class="legend">${items
+      .map((p) => `<span class="legend-item"><span class="swatch ${p.color}"></span>${esc(p.label)}<span class="muted">${money(p.cost)}</span></span>`)
+      .join('')}</div>`;
+  }
+
   function renderChart(o) {
     const unit = o.bucketDays === 1 ? 'day' : 'week';
     const max = niceMax(Math.max(0, ...o.buckets.map((b) => b.cost)));
@@ -127,8 +195,12 @@
     const bars = o.buckets
       .map((b, i) => {
         const label = o.bucketDays === 1 ? longDay(b.start) : `Week of ${longDay(b.start)}`;
-        const aria = `${label}: ${money(b.cost)}, ${plural(b.sessions, 'session')}`;
-        return `<div class="bar-slot" data-i="${i}" tabindex="0" aria-label="${esc(aria)}"><div class="bar${b.cost ? '' : ' empty'}" data-h="${(b.cost / max) * 100}"></div></div>`;
+        const ps = parts(b);
+        const aria = `${label}: ${money(b.cost)}, ${plural(b.sessions, 'session')}${
+          colorBy === 'total' ? '' : ps.map((p) => `; ${p.label} ${money(p.cost)}`).join('')
+        }`;
+        const segs = ps.map((p) => `<div class="seg ${p.color}" data-h="${(p.cost / b.cost) * 100}"></div>`).join('');
+        return `<div class="bar-slot" data-i="${i}" tabindex="0" aria-label="${esc(aria)}"><div class="bar${b.cost ? '' : ' empty'}" data-h="${(b.cost / max) * 100}">${segs}</div></div>`;
       })
       .join('');
     // Three date labels: first, middle and last bar.
@@ -142,6 +214,11 @@
         <div class="card-head">
           <h2>Cost per ${unit}</h2>
           <span class="muted">at Claude API prices</span>
+          <span class="spacer"></span>
+          <span class="muted seg-label">Color by</span>
+          <div class="segmented small" role="radiogroup" aria-label="Color bars by">
+            ${COLOR_BYS.map(([v, label]) => `<button role="radio" data-color-by="${v}" class="${v === colorBy ? 'active' : ''}" aria-checked="${v === colorBy}">${label}</button>`).join('')}
+          </div>
         </div>
         <div class="chart">
           <div class="y-axis">${ticks.map((t) => `<span>${money(t).replace('.00', '')}</span>`).join('')}</div>
@@ -151,27 +228,29 @@
             <div class="x-axis">${xLabels}</div>
           </div>
         </div>
+        ${renderLegend(o)}
       </section>`;
   }
 
-  function meter(fraction) {
-    return `<div class="meter"><div data-w="${Math.max(0, Math.min(1, fraction)) * 100}"></div></div>`;
+  function meter(fraction, color) {
+    return `<div class="meter"><div class="${color}" data-w="${Math.max(0, Math.min(1, fraction)) * 100}"></div></div>`;
   }
 
   function renderProjects(o) {
     const shown = o.projects.slice(0, PROJECTS_SHOWN);
     const top = Math.max(...shown.map((p) => p.cost), 0) || 1;
     const rows = shown
-      .map(
-        (p) => `
+      .map((p) => {
+        const color = colorOf('project', p.key);
+        return `
         <tr>
-          <td class="name"><span class="name-cell"><button class="link" data-only="${esc(p.key)}" title="${esc(p.path)}\nShow only this project"><span class="swatch" data-hue="${p.hue}"></span>${esc(p.name)}</button><button class="icon-btn small" data-folder="${esc(p.path)}" title="Open folder in a new window" aria-label="Open ${esc(p.name)} in a new window"><i class="codicon codicon-folder-opened"></i></button></span></td>
+          <td class="name"><span class="name-cell"><button class="link" data-only="${esc(p.key)}" title="${esc(p.path)}\nShow only this project"><span class="swatch ${color}"></span>${esc(p.name)}</button><button class="icon-btn small" data-folder="${esc(p.path)}" title="Open folder in a new window" aria-label="Open ${esc(p.name)} in a new window"><i class="codicon codicon-folder-opened"></i></button></span></td>
           <td class="num">${count(p.sessions)}</td>
           <td class="num">${count(p.prompts)}</td>
-          <td class="num cost">${money(p.cost)}${meter(p.cost / top)}</td>
+          <td class="num cost">${money(p.cost)}${meter(p.cost / top, color)}</td>
           <td class="num muted">${relative(p.lastTime)}</td>
-        </tr>`,
-      )
+        </tr>`;
+      })
       .join('');
     const more = o.projects.length - shown.length;
     return `
@@ -188,14 +267,15 @@
   function renderModels(o) {
     const total = o.models.reduce((n, m) => n + m.cost, 0) || 1;
     const rows = o.models
-      .map(
-        (m) => `
+      .map((m) => {
+        const color = colorOf('model', m.model);
+        return `
         <tr>
-          <td class="name">${esc(m.model)}</td>
-          <td class="num cost">${money(m.cost)}${meter(m.cost / total)}</td>
+          <td class="name"><span class="name-cell"><span class="swatch ${color}"></span>${esc(m.model)}</span></td>
+          <td class="num cost">${money(m.cost)}${meter(m.cost / total, color)}</td>
           <td class="num muted">${m.cost / total < 0.005 ? '&lt;1' : Math.round((m.cost / total) * 100)}%</td>
-        </tr>`,
-      )
+        </tr>`;
+      })
       .join('');
     return `
       <section class="card">
@@ -204,15 +284,15 @@
       </section>`;
   }
 
-  function renderTopSessions(o) {
-    if (!o.topSessions.length) return '';
-    const rows = o.topSessions
+  function renderSessions(o) {
+    const list = sessionSort === 'cost' ? o.topSessions : o.recentSessions;
+    const rows = list
       .map(
         (s) => `
         <button class="session" data-id="${esc(s.id)}" title="Open transcript">
           <span class="session-title">${esc(s.title)}</span>
           <span class="session-meta">
-            <span class="tag"><span class="swatch" data-hue="${s.hue}"></span>${esc(s.project)}</span>
+            <span class="tag"><span class="swatch ${colorOf('project', s.projectKey)}"></span>${esc(s.project)}</span>
             <span class="tag"><i class="codicon codicon-comment"></i>${count(s.prompts)}</span>
             <span class="tag muted">${relative(s.lastTime)}</span>
           </span>
@@ -222,39 +302,75 @@
       .join('');
     return `
       <section class="card">
-        <div class="card-head"><h2>Most expensive sessions</h2><span class="muted">cost in this range</span></div>
-        <div class="sessions">${rows}</div>
+        <div class="card-head">
+          <h2>Sessions</h2><span class="muted">${sessionSort === 'cost' ? 'most expensive, cost in this range' : 'most recently active'}</span>
+          <span class="spacer"></span>
+          <div class="segmented small" role="radiogroup" aria-label="Sort sessions by">
+            ${SESSION_SORTS.map(([v, label]) => `<button role="radio" data-sort="${v}" class="${v === sessionSort ? 'active' : ''}" aria-checked="${v === sessionSort}">${label}</button>`).join('')}
+          </div>
+        </div>
+        ${rows ? `<div class="sessions">${rows}</div>` : '<div class="muted pad">No priced usage in this range.</div>'}
       </section>`;
   }
 
   // ---------- project filter ----------
 
-  const save = () => vscode.setState({ range, projects });
+  const save = () => vscode.setState({ range, scope, projects, sessionSort, colorBy });
+  const postFilters = () => vscode.postMessage({ type: 'setFilters', range, scope, projects });
 
-  function setProjects(next) {
-    projects = next;
+  function setScope(next, picked = projects) {
+    scope = next;
+    projects = picked;
     save();
-    vscode.postMessage({ type: 'setFilters', range, projects });
+    postFilters();
   }
+
+  /** The scope in effect: the extension shows all projects when no folder is open. */
+  const shownScope = () => state?.scope ?? scope;
+
+  /** Keys of the projects currently shown, or null for all. */
+  const shownKeys = () => state?.overview.filter ?? null;
+
+  /** Shows just these projects; none goes back to all of them. */
+  const pick = (keys) => (keys.length ? setScope('pick', keys) : setScope('all', []));
 
   function renderFilter() {
     const all = state?.overview.allProjects ?? [];
     const byKey = new Map(all.map((p) => [p.key, p]));
-    const chosen = projects.map((k) => byKey.get(k)).filter(Boolean);
-    $projectLabel.textContent = !chosen.length ? 'All projects' : chosen.length === 1 ? chosen[0].name : `${chosen.length} projects`;
-    $projectBtn.classList.toggle('on', chosen.length > 0);
+    const current = shownScope();
+    const chosen = current === 'pick' ? (shownKeys() ?? []).map((k) => byKey.get(k)).filter(Boolean) : [];
+    $projectLabel.textContent =
+      current === 'workspace'
+        ? 'Current workspace'
+        : current === 'all'
+          ? 'All projects'
+          : chosen.length === 1
+            ? chosen[0].name
+            : `${chosen.length} projects`;
+    $projectBtn.title = current === 'workspace' && state?.workspaceName ? `Projects in ${state.workspaceName}` : '';
+    $projectBtn.classList.toggle('on', current === 'pick');
     $selected.innerHTML = chosen
       .map(
         (p) =>
-          `<span class="pill" title="${esc(p.path)}"><span class="swatch" data-hue="${p.hue}"></span>${esc(p.name)}<button class="pill-x" data-remove="${esc(p.key)}" title="Remove filter" aria-label="Remove ${esc(p.name)}"><i class="codicon codicon-close"></i></button></span>`,
+          `<span class="pill" title="${esc(p.path)}"><span class="swatch ${colorOf('project', p.key)}"></span>${esc(p.name)}<button class="pill-x" data-remove="${esc(p.key)}" title="Remove filter" aria-label="Remove ${esc(p.name)}"><i class="codicon codicon-close"></i></button></span>`,
       )
       .join('');
-    paint($selected);
     renderMenu();
   }
 
   function renderMenu() {
+    const current = shownScope();
+    const scopeItem = (value, icon, label, note) => `
+      <button class="menu-item scope" data-scope="${value}" role="menuitemradio" aria-checked="${current === value}">
+        <i class="codicon codicon-${current === value ? 'check' : 'blank'}"></i><i class="codicon codicon-${icon}"></i>
+        <span class="menu-name">${label}</span>${note ? `<span class="muted menu-time">${esc(note)}</span>` : ''}
+      </button>`;
+    $projectScopes.innerHTML =
+      (state?.hasWorkspace ? scopeItem('workspace', 'root-folder', 'Current workspace', state.workspaceName) : '') +
+      scopeItem('all', 'folder-library', 'All projects', '');
+
     const all = state?.overview.allProjects ?? [];
+    const checked = new Set(current === 'all' ? [] : shownKeys() ?? []);
     const q = menuQuery.trim().toLowerCase();
     const shown = q ? all.filter((p) => p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q)) : all;
     $projectItems.innerHTML = shown.length
@@ -262,15 +378,14 @@
           .map(
             (p) => `
           <label class="menu-item" title="${esc(p.path)}">
-            <input type="checkbox" data-key="${esc(p.key)}"${projects.includes(p.key) ? ' checked' : ''} />
-            <span class="swatch" data-hue="${p.hue}"></span>
+            <input type="checkbox" data-key="${esc(p.key)}"${checked.has(p.key) ? ' checked' : ''} />
+            <span class="swatch ${colorOf('project', p.key)}"></span>
             <span class="menu-name">${esc(p.name)}</span>
             <span class="muted menu-time">${relative(p.lastTime)}</span>
           </label>`,
           )
           .join('')
       : '<div class="muted menu-empty">No matching projects</div>';
-    paint($projectItems);
   }
 
   function openMenu(open) {
@@ -284,12 +399,11 @@
     }
   }
 
-  /** The page's CSP allows no inline style attributes, so sizes and colors are set through the DOM. */
+  /** The page's CSP allows no inline style attributes, so sizes are set through the DOM. */
   function paint(root) {
     for (const el of root.querySelectorAll('[data-h]')) el.style.height = `${el.dataset.h}%`;
     for (const el of root.querySelectorAll('[data-w]')) el.style.width = `${el.dataset.w}%`;
     for (const el of root.querySelectorAll('[data-x]')) el.style.left = `${el.dataset.x}%`;
-    for (const el of root.querySelectorAll('[data-hue]')) el.style.setProperty('--hue', el.dataset.hue);
   }
 
   function render() {
@@ -305,12 +419,12 @@
     }
     renderFilter();
     const o = state.overview;
-    const span = o.from === o.to ? longDay(o.to) : `${longDay(o.from)} – ${longDay(o.to)}`;
-    $sub.innerHTML = `${esc(span)}${
-      state.workspaceOnly ? ' · <button class="link" id="show-all" title="Include sessions from every project">current workspace only</button>' : ''
-    }`;
+    $sub.textContent = o.from === o.to ? longDay(o.to) : `${longDay(o.from)} – ${longDay(o.to)}`;
     if (!o.totals.sessions) {
-      $body.innerHTML = `<div class="empty-state muted">No sessions in this range${o.filter.length ? ' for the chosen projects' : ''}.</div>`;
+      const where = { workspace: ' from this workspace', pick: ' for the chosen projects', all: '' }[shownScope()];
+      $body.innerHTML = `<div class="empty-state muted">No sessions in this range${where}.${
+        where ? '<div><button class="link" data-scope="all">Show all projects</button></div>' : ''
+      }</div>`;
       return;
     }
     $body.innerHTML = `
@@ -320,7 +434,7 @@
         ${renderProjects(o)}
         ${renderModels(o)}
       </div>
-      ${renderTopSessions(o)}`;
+      ${renderSessions(o)}`;
     paint($body);
   }
 
@@ -331,7 +445,17 @@
     if (!b) return;
     const o = state.overview;
     const label = o.bucketDays === 1 ? longDay(b.start) : `Week of ${longDay(b.start)}`;
-    $tip.innerHTML = `<div class="tip-title">${esc(label)}</div><div class="tip-row"><span>Cost</span><b>${money(b.cost)}</b></div><div class="tip-row"><span>Sessions</span><b>${count(b.sessions)}</b></div>`;
+    const breakdown =
+      colorBy === 'total'
+        ? ''
+        : [...parts(b)]
+            .sort((a, c) => c.cost - a.cost)
+            .map((p) => `<div class="tip-row"><span><span class="swatch ${p.color}"></span>${esc(p.label)}</span><b>${money(p.cost)}</b></div>`)
+            .join('');
+    $tip.innerHTML = `<div class="tip-title">${esc(label)}</div>
+      <div class="tip-row"><span>Cost</span><b>${money(b.cost)}</b></div>
+      <div class="tip-row"><span>Sessions</span><b>${count(b.sessions)}</b></div>
+      ${breakdown ? `<div class="tip-split">${breakdown}</div>` : ''}`;
     $tip.hidden = false;
     const r = slot.getBoundingClientRect();
     const t = $tip.getBoundingClientRect();
@@ -364,42 +488,54 @@
   // ---------- events ----------
 
   document.addEventListener('click', (e) => {
+    const sortBtn = e.target.closest('[data-sort]');
+    if (sortBtn) {
+      sessionSort = sortBtn.dataset.sort;
+      save();
+      render();
+      return;
+    }
+    const colorBtn = e.target.closest('[data-color-by]');
+    if (colorBtn) {
+      colorBy = colorBtn.dataset.colorBy;
+      save();
+      render();
+      return;
+    }
     const rangeBtn = e.target.closest('[data-range]');
     if (rangeBtn) {
       range = Number(rangeBtn.dataset.range);
       save();
       render();
-      vscode.postMessage({ type: 'setFilters', range, projects });
+      postFilters();
+      return;
+    }
+    const scopeBtn = e.target.closest('[data-scope]');
+    if (scopeBtn) {
+      openMenu(false);
+      setScope(scopeBtn.dataset.scope);
       return;
     }
     if (e.target.closest('#project-btn')) {
       openMenu($menu.hidden);
       return;
     }
-    if (e.target.closest('#project-clear')) {
-      openMenu(false);
-      setProjects([]);
-      return;
-    }
     if (e.target.closest('#project-menu')) return;
     openMenu(false);
     const remove = e.target.closest('[data-remove]');
     if (remove) {
-      setProjects(projects.filter((k) => k !== remove.dataset.remove));
+      pick((shownKeys() ?? []).filter((k) => k !== remove.dataset.remove));
       return;
     }
     const only = e.target.closest('[data-only]');
     if (only) {
       // Clicking the only project shown goes back to all of them.
-      setProjects(projects.length === 1 && projects[0] === only.dataset.only ? [] : [only.dataset.only]);
+      const keys = shownKeys();
+      pick(shownScope() === 'pick' && keys.length === 1 && keys[0] === only.dataset.only ? [] : [only.dataset.only]);
       return;
     }
     if (e.target.closest('#refresh')) {
       vscode.postMessage({ type: 'refresh' });
-      return;
-    }
-    if (e.target.closest('#show-all')) {
-      vscode.postMessage({ type: 'showAll' });
       return;
     }
     const folder = e.target.closest('[data-folder]');
@@ -416,7 +552,9 @@
   $projectItems.addEventListener('change', (e) => {
     const key = e.target.dataset?.key;
     if (key === undefined) return;
-    setProjects(e.target.checked ? [...projects, key] : projects.filter((k) => k !== key));
+    // Ticking from the workspace view starts from the workspace's projects.
+    const base = shownScope() === 'all' ? [] : shownKeys() ?? [];
+    pick(e.target.checked ? [...base, key] : base.filter((k) => k !== key));
   });
   $projectQ.addEventListener('input', () => {
     menuQuery = $projectQ.value;
@@ -434,14 +572,16 @@
     if (msg?.type === 'state') {
       state = msg;
       range = msg.overview.range;
-      // Projects that no longer exist drop out of the filter.
-      projects = msg.overview.filter;
-      save();
+      // Picked projects that no longer exist drop out.
+      if (msg.scope === 'pick') {
+        projects = msg.overview.filter ?? [];
+        save();
+      }
       hideTip();
       render();
     }
   });
 
   render();
-  vscode.postMessage({ type: 'ready', range, projects });
+  vscode.postMessage({ type: 'ready', range, scope, projects });
 })();

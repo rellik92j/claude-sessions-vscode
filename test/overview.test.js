@@ -55,7 +55,13 @@ test('overview: range splits a long session, totals, projects, models and top se
   assert.deepEqual(o.models.map((m) => m.model), ['opus-5-5', 'sonnet-5-5']);
   close(o.models[1].cost, 2);
   assert.deepEqual(o.topSessions.map((s) => s.id), ['c', 'a', 'b']);
+  // Bars split by model and project; colors follow all-time cost, so they hold when the range changes.
+  close(o.buckets[5].byModel['sonnet-5-5'], 2);
+  close(o.buckets[4].byProject[normalizePath('/repo')], 4);
+  assert.deepEqual(o.series.model, ['opus-5-5', 'sonnet-5-5']);
+  assert.deepEqual(o.series.project, [normalizePath('/repo'), normalizePath('/other'), normalizePath('/old')]);
   close(o.topSessions[1].cost, 4);
+  assert.deepEqual(o.recentSessions.map((s) => s.id), ['c', 'b', 'a']);
 
   const all = buildOverview(sessions, 0, now);
   assert.equal(all.from, dayKey(now - 200 * DAY));
@@ -81,5 +87,6 @@ test('overview: project filter', () => {
   close(o.totals.cost, 8);
   assert.deepEqual(o.projects.map((p) => p.name).sort(), ['repo', 'third']);
   assert.deepEqual(o.allProjects.map((p) => p.name), ['third', 'other', 'repo'], 'every project, most recent first');
-  assert.deepEqual(buildOverview(sessions, 7, now, []).totals.sessions, 3);
+  assert.equal(buildOverview(sessions, 7, now).totals.sessions, 3, 'no filter: all projects');
+  assert.equal(buildOverview(sessions, 7, now, []).totals.sessions, 0, 'an empty filter shows nothing');
 });
