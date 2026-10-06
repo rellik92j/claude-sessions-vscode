@@ -1,7 +1,10 @@
+import { execFile } from 'child_process';
 import { existsSync } from 'fs';
+import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { formatRelative, isInside } from './format';
+import { buildHandoff, collectHandoffFacts } from './handoff';
 import { GroupBy, projectPath, SessionModel } from './model';
 import { isEmptyQuery, parseQuery } from './query';
 import { SessionInfo } from './sessionParser';
@@ -21,6 +24,38 @@ function projectsDir(): string {
 }
 
 const hasClaudeCode = () => !!vscode.extensions.getExtension(CLAUDE_CODE_EXTENSION);
+
+/** Matches the Claude Code extension's "Open in Terminal": a terminal tab in the editor area with the Claude logo. */
+function claudeTerminalOptions(name: string, cwd: string | undefined): vscode.TerminalOptions {
+  const inEditor = config().get<string>('terminalLocation', 'editor') === 'editor';
+  const claudeCode = vscode.extensions.getExtension(CLAUDE_CODE_EXTENSION);
+  return {
+    name,
+    cwd,
+    iconPath: claudeCode
+      ? vscode.Uri.joinPath(claudeCode.extensionUri, 'resources', 'claude-logo.svg')
+      : new vscode.ThemeIcon('comment-discussion'),
+    location: inEditor ? { viewColumn: vscode.ViewColumn.Beside } : vscode.TerminalLocation.Panel,
+  };
+}
+
+/**
+ * The claudeCommand setting as executable + leading arguments, for starting the CLI directly. A value that is an
+ * existing path is kept whole (it may contain spaces); otherwise it is split on whitespace ("npx claude").
+ */
+function claudeCommandParts(): string[] {
+  const command = (config().get<string>('claudeCommand', 'claude') || 'claude').trim();
+  return existsSync(command) ? [command] : command.split(/\s+/);
+}
+
+/** `git status --short --branch` in the folder, or undefined when it isn't a repository or git isn't available. */
+function gitStatus(cwd: string): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    execFile('git', ['status', '--short', '--branch'], { cwd, timeout: 5000, windowsHide: true }, (err, stdout) =>
+      resolve(err ? undefined : stdout),
+    );
+  });
+}
 
 export function activate(context: vscode.ExtensionContext): void {
   const store = new SessionStore(projectsDir());
@@ -130,20 +165,39 @@ export function activate(context: vscode.ExtensionContext): void {
       );
     }
     const command = config().get<string>('claudeCommand', 'claude') || 'claude';
-    // Match the Claude Code extension's "Open in Terminal": a terminal tab in the editor area with the Claude logo.
-    const inEditor = config().get<string>('terminalLocation', 'editor') === 'editor';
-    const claudeCode = vscode.extensions.getExtension(CLAUDE_CODE_EXTENSION);
-    const terminal = vscode.window.createTerminal({
-      name: `Claude Code · ${session.title.slice(0, 40)}`,
-      cwd: hasCwd ? cwd : undefined,
-      iconPath: claudeCode
-        ? vscode.Uri.joinPath(claudeCode.extensionUri, 'resources', 'claude-logo.svg')
-        : new vscode.ThemeIcon('comment-discussion'),
-      location: inEditor ? { viewColumn: vscode.ViewColumn.Beside } : vscode.TerminalLocation.Panel,
-    });
+    const terminal = vscode.window.createTerminal(
+      claudeTerminalOptions(`Claude Code · ${session.title.slice(0, 40)}`, hasCwd ? cwd : undefined),
+    );
     sessionTerminals.set(session.id, terminal);
     terminal.show();
     terminal.sendText(`${command} --resume ${session.id}`);
+  };
+
+  /** Starts a new CLI session whose first prompt is a handoff of where this one left off. */
+  const continueInNewSession = async (session: SessionInfo) => {
+    const cwd = projectPath(session);
+    const hasCwd = existsSync(cwd);
+    if (!hasCwd) {
+      vscode.window.showWarningMessage(`The session's folder no longer exists (${cwd}). The new session starts in the default folder.`);
+    }
+    let log: string;
+    try {
+      log = await fs.readFile(session.filePath, 'utf8');
+    } catch (err) {
+      vscode.window.showErrorMessage(`Could not read session log: ${(err as Error).message}`);
+      return;
+    }
+    const handoff = buildHandoff(session, collectHandoffFacts(log), cwd, hasCwd ? await gitStatus(cwd) : undefined);
+    const [shellPath, ...shellArgs] = claudeCommandParts();
+    // The CLI is the terminal's process rather than a command typed into a shell, so the multi-line handoff arrives
+    // as one argument whatever the shell's quoting rules (Windows PowerShell 5.1 strips embedded double quotes).
+    // The CLI sends a prompt given this way at once; the handoff ends by asking Claude to summarise and wait.
+    const terminal = vscode.window.createTerminal({
+      ...claudeTerminalOptions(`Claude Code · Continued: ${session.title.slice(0, 30)}`, hasCwd ? cwd : undefined),
+      shellPath,
+      shellArgs: [...shellArgs, '--name', `Continued: ${session.title}`, handoff],
+    });
+    terminal.show();
   };
 
   const openInClaudeCode = async (session: SessionInfo) => {
@@ -185,6 +239,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('claudeSessions.showCurrentWorkspaceOnly', () => setConfig('currentWorkspaceOnly', true)),
     vscode.commands.registerCommand('claudeSessions.showAll', () => setConfig('currentWorkspaceOnly', false)),
     vscode.commands.registerCommand('claudeSessions.resume', withSession(resume)),
+    vscode.commands.registerCommand('claudeSessions.continueInNewSession', withSession(continueInNewSession)),
     vscode.commands.registerCommand('claudeSessions.openInClaudeCode', withSession(openInClaudeCode)),
     // Optional arguments: search words to highlight in the transcript, and true to open it in its own tab
     // rather than the shared preview tab.

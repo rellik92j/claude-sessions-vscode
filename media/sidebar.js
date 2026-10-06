@@ -132,6 +132,7 @@
         <div class="meta">${meta}</div>
         <div class="card-actions">
           <button class="icon-btn accent" data-action="resume" title="Resume in Claude Code terminal (Ctrl+Enter)"><i class="codicon codicon-play"></i></button>
+          <button class="icon-btn" data-action="continueInNewSession" title="Continue in a new session: starts the CLI with a handoff of where this one left off"><i class="codicon codicon-arrow-circle-right"></i></button>
           ${state.hasClaudeCode ? '<button class="icon-btn" data-action="openInClaudeCode" title="Open in Claude Code chat"><i class="codicon codicon-comment-discussion"></i></button>' : ''}
           <button class="icon-btn" data-action="openTranscript" title="Read transcript (Enter)"><i class="codicon codicon-book"></i></button>
           <button class="icon-btn" data-action="copyId" title="Copy session ID"><i class="codicon codicon-copy"></i></button>

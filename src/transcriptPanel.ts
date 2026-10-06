@@ -87,6 +87,7 @@ export class TranscriptPanels {
     panel.webview.onDidReceiveMessage(async (msg) => {
       switch (msg?.command) {
         case 'resume':
+        case 'continueInNewSession':
         case 'openInClaudeCode':
         case 'copyId':
         case 'openRawFile':
@@ -387,6 +388,7 @@ export function buildHtml(session: SessionInfo, entries: TranscriptEntry[], o: H
   <div class="topbar-title"><span class="claude-dot">${CLAUDE_MARK}</span><span>${escapeHtml(session.title)}</span></div>
   <div class="topbar-actions">
     <button class="btn primary" data-cmd="resume" title="Resume this session with the Claude Code CLI"><i class="codicon codicon-play"></i><span>Resume</span></button>
+    <button class="btn" data-cmd="continueInNewSession" title="Start a new Claude Code CLI session with a handoff of where this one left off"><i class="codicon codicon-arrow-circle-right"></i><span>Continue in new session</span></button>
     ${o.hasClaudeCode ? '<button class="btn" data-cmd="openInClaudeCode" title="Open in the Claude Code chat"><i class="codicon codicon-comment-discussion"></i><span>Open in chat</span></button>' : ''}
     ${o.preview ? '<button class="btn" data-cmd="keepOpen" title="This tab is reused for the next transcript you open. Keep this one in its own tab."><i class="codicon codicon-pinned"></i><span>Keep open</span></button>' : ''}
     <button class="icon-btn" data-cmd="refresh" title="Reload"><i class="codicon codicon-refresh"></i></button>

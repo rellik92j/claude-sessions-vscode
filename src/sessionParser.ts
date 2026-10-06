@@ -138,7 +138,8 @@ function parseTime(value: unknown): number | undefined {
   return Number.isNaN(t) ? undefined : t;
 }
 
-function* records(text: string): Generator<any> {
+/** Parsed JSONL records, skipping blank and unparseable lines. */
+export function* records(text: string): Generator<any> {
   let start = 0;
   while (start < text.length) {
     let end = text.indexOf('\n', start);

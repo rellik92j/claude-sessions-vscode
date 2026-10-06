@@ -54,6 +54,7 @@ function fakeVscode(state) {
         return panel;
       },
       onDidCloseTerminal: () => disposable,
+      createTerminal: (options) => (state.terminals.push(options), { show() {}, sendText(t) { options.sent = t; } }),
       showErrorMessage: (m) => state.errors.push(m),
       showWarningMessage: async () => undefined,
       setStatusBarMessage() {},
@@ -85,7 +86,7 @@ test('bundled extension activates, fills the sidebar, and renders a transcript',
     { type: 'ai-title', aiTitle: 'Dark mode toggle' },
   ]);
 
-  const state = { projectsDir, providers: {}, commands: {}, panels: [], panelPosts: [], errors: [] };
+  const state = { projectsDir, providers: {}, commands: {}, panels: [], panelPosts: [], errors: [], terminals: [] };
   const vscode = fakeVscode(state);
   const originalLoad = Module._load;
   Module._load = function (request, ...rest) {
@@ -178,6 +179,21 @@ test('bundled extension activates, fills the sidebar, and renders a transcript',
     state.panels[3].dispose();
     await open('ffff');
     assert.equal(state.panels.length, 5, 'closing the preview tab means a new one next time');
+    assert.deepEqual(state.errors, []);
+
+    // Continue in new session: the CLI is the terminal's process, with the handoff as one argument (no shell typing).
+    await state.panels[0].onMessage({ command: 'continueInNewSession' });
+    await new Promise((r) => setTimeout(r, 300));
+    const t = state.terminals.pop();
+    assert.ok(t, 'terminal created');
+    assert.equal(t.shellPath, 'claude');
+    assert.equal(t.sent, undefined, 'nothing typed into a shell');
+    assert.deepEqual(t.shellArgs.slice(0, 2), ['--name', 'Continued: Session bbbb']);
+    const handoff = t.shellArgs[2];
+    assert.equal(t.shellArgs.length, 3);
+    assert.match(handoff, /## My last request\nAdd a \*\*dark mode\*\* toggle/);
+    assert.match(handoff, /## Your last reply\nDone:/);
+    assert.match(handoff, /wait for my instruction\.$/);
     assert.deepEqual(state.errors, []);
 
     // Assets referenced by the webviews must exist on disk.
