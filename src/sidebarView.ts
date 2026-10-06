@@ -76,6 +76,7 @@ function cardText(c: CardData): string {
 
 const PAGE_COMMANDS: Record<string, string> = {
   resume: 'claudeSessions.resume',
+  continueInNewSession: 'claudeSessions.continueInNewSession',
   openTranscript: 'claudeSessions.openTranscript',
   openInClaudeCode: 'claudeSessions.openInClaudeCode',
   openPr: 'claudeSessions.openPr',
