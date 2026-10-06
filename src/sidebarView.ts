@@ -24,6 +24,12 @@ export interface CardData {
   model?: string;
   prNumber?: number;
   prRepository?: string;
+  /** Cost at Claude API prices (USD). */
+  cost?: number;
+  /** Context window fill at the last request, 0–1. */
+  context?: number;
+  /** When the prompt cache expires (ms since epoch). */
+  cacheExpires?: number;
 }
 
 export function hueFor(text: string): number {
@@ -61,6 +67,9 @@ export function toCard(s: SessionInfo): CardData {
     model: s.model,
     prNumber: s.prUrl ? s.prNumber : undefined,
     prRepository: s.prRepository,
+    cost: s.usage?.cost,
+    context: s.usage?.context && s.usage.context.tokens / s.usage.context.limit,
+    cacheExpires: s.usage?.cache && s.usage.cache.lastRequest + s.usage.cache.ttlMs,
   };
 }
 

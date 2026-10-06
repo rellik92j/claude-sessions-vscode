@@ -12,6 +12,8 @@
 
 The sidebar shows a card for each session with its title, your latest prompt, when it happened, the git branch, how many prompts it has, and badges for subagents and pull requests. A pulsing green dot marks sessions that were active in the last few minutes.
 
+Each card also shows what the session cost at Claude API prices. Two more badges appear only when they're useful: how full the context window is once it passes 50%, and a countdown while the prompt cache is still warm, when resuming is cheapest.
+
 - **Projects** groups sessions by folder, and each project gets its own colored avatar. **Recent** groups them by date (Today, Yesterday, Previous 7 Days, and so on).
 - **Workspace** filter: show only the sessions started in the folders you have open in this window.
 - Hover a card for quick actions: resume, continue in a new session, open in Claude Code chat, read the transcript, or copy the session ID. Right-click for more.
@@ -35,6 +37,7 @@ Press `/` to search. The search covers the card details and the full conversatio
 
 Click a session to open its transcript. Your prompts are on the right and Claude's replies are on the left, with markdown, tables and syntax-highlighted code that you can copy.
 
+- Above the conversation, usage stats like those in Claude Code's status line: how full the context window is, whether the prompt cache is still warm and for how long, the token counts, and the cost at Claude API prices, subagents included. Expand **Cost breakdown** to see the cost of each token type. On a Pro or Max plan you aren't billed per token, so the cost shows what the session would cost through the API.
 - Each tool call is a compact row with a ✓ or ✗. Click it to see the input and output. File edits show as a red/green diff.
 - Hide tool calls to read just the conversation, or jump straight to the latest message.
 - If you opened the transcript from a search, your search words are highlighted and it starts at the first match. Step through matches with F3 / Shift+F3.
@@ -45,7 +48,7 @@ Click a session to open its transcript. Your prompts are on the right and Claude
 ![Resuming a session in a Claude Code terminal beside the editor](docs/images/resume.png)
 
 - **Resume** (▶) opens `claude --resume <id>` in a terminal tab beside your editor, in the session's project folder. If the session is already open, its terminal is focused instead.
-- **Continue in New Session** (⮕) starts a fresh session with a handoff of where the old one stopped. The handoff includes your last request, Claude's last reply, the files it edited and read, any open to-dos, the current `git status`, and the path to the old transcript. Claude is asked to summarize and wait for your instruction before changing anything. Use this when a session has grown too long to keep working in.
+- **Continue in New Session** (⮕) starts a fresh session with a handoff of where the old one stopped. The handoff includes your last request, Claude's last reply, the files it edited and read, any open to-dos, the current `git status`, and the path to the old transcript. Claude is asked to summarize and wait for your instruction before changing anything. Use this when a session has grown too long to keep working in. To use a different model or effort level than your Claude Code settings, choose **Continue in New Session with Model…** from the right-click menu, or the ⌄ button next to **Continue in new session** in a transcript.
 - **Open in Claude Code Chat** reopens the session in the chat panel of the official Claude Code extension, if you have it installed.
 
 The sidebar refreshes on its own as sessions change, and everything follows your VS Code color theme.

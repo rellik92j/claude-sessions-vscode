@@ -58,6 +58,9 @@ function fakeVscode(state) {
       showErrorMessage: (m) => state.errors.push(m),
       showWarningMessage: async () => undefined,
       setStatusBarMessage() {},
+      // Tests answer quick picks by setting state.pick to a function of the items and options.
+      showQuickPick: async (items, options) => state.pick?.(items, options),
+      showInputBox: async () => undefined,
     },
     commands: {
       registerCommand: (id, f) => ((state.commands[id] = f), disposable),
@@ -82,7 +85,17 @@ test('bundled extension activates, fills the sidebar, and renders a transcript',
   const ts = new Date().toISOString();
   writeSession(path.join(projectsDir, 'C--repo'), 'aaaa-1111', [
     { type: 'user', message: { content: 'Add a **dark mode** toggle' }, cwd: 'C:\\repo', gitBranch: 'main', timestamp: ts },
-    { type: 'assistant', message: { id: 'm1', model: 'claude-opus-5-5', content: [{ type: 'text', text: 'Done:\n\n```ts\nconst x = 1;\n```' }] }, timestamp: ts },
+    {
+      type: 'assistant',
+      message: {
+        id: 'm1',
+        model: 'claude-opus-5-5',
+        content: [{ type: 'text', text: 'Done:\n\n```ts\nconst x = 1;\n```' }],
+        usage: { input_tokens: 10, cache_creation_input_tokens: 20000, cache_creation: { ephemeral_1h_input_tokens: 20000 }, cache_read_input_tokens: 0, output_tokens: 500 },
+      },
+      effort: 'high',
+      timestamp: ts,
+    },
     { type: 'ai-title', aiTitle: 'Dark mode toggle' },
   ]);
 
@@ -126,6 +139,17 @@ test('bundled extension activates, fills the sidebar, and renders a transcript',
     assert.match(html, /<strong>dark mode<\/strong>/);
     assert.match(html, /hljs-keyword/);
     assert.doesNotMatch(html, /data-highlight/);
+    // Usage stats: context, a warm 1-hour cache, cost (10 input at $4, 20k 1h writes at $8 and 500 output at $20 per MTok = $0.17).
+    assert.match(html, /claude-opus-5-5 · high/);
+    assert.match(html, /20k<span> \/ 1M<\/span>/);
+    assert.match(html, /class="stat cache" data-expires="\d+"/);
+    assert.match(html, /<div class="stat-value">\$0\.17<\/div>/);
+    // The same stats, compact, in the sticky top bar, with a second tool-call switch.
+    assert.match(html, /<div class="topbar-stats"><button class="strip-stats" id="to-top"[^>]*>.*claude-opus-5-5 · high.*20k \/ 1M · 2%.*\$0\.17/);
+    assert.equal(html.match(/data-tools-toggle/g)?.length ?? 0, 0, 'no tool calls in this session, so no switches');
+    const card = msg.groups[0].sessions[0];
+    assert.ok(Math.abs(card.cost - 0.17004) < 1e-6);
+    assert.ok(card.cacheExpires > Date.now());
 
     // Search: the sidebar sends the query, the host answers with matching ids, snippets and highlight words.
     const search = (query) => {
@@ -195,6 +219,27 @@ test('bundled extension activates, fills the sidebar, and renders a transcript',
     assert.match(handoff, /## Your last reply\nDone:/);
     assert.match(handoff, /wait for my instruction\.$/);
     assert.deepEqual(state.errors, []);
+
+    // With model: two quick picks, then --model and --effort ahead of the handoff.
+    const titles = [];
+    state.pick = (items, options) => {
+      titles.push(options.title);
+      return items.find((i) => i.value === (titles.length === 1 ? 'sonnet' : 'xhigh'));
+    };
+    await state.panels[0].onMessage({ command: 'continueInNewSessionWithModel' });
+    await new Promise((r) => setTimeout(r, 300));
+    const tm = state.terminals.pop();
+    assert.equal(titles.length, 2);
+    assert.deepEqual(tm.shellArgs.slice(0, 6), ['--model', 'sonnet', '--effort', 'xhigh', '--name', 'Continued: Session bbbb']);
+    // Default for both adds no flags; cancelling starts nothing.
+    state.pick = (items) => items[0];
+    await state.panels[0].onMessage({ command: 'continueInNewSessionWithModel' });
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(state.terminals.pop().shellArgs[0], '--name');
+    state.pick = () => undefined;
+    await state.panels[0].onMessage({ command: 'continueInNewSessionWithModel' });
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(state.terminals.length, 0);
 
     // Assets referenced by the webviews must exist on disk.
     for (const f of ['media/sidebar.js', 'media/sidebar.css', 'media/transcript.js', 'media/transcript.css', 'node_modules/@vscode/codicons/dist/codicon.css', 'node_modules/@vscode/codicons/dist/codicon.ttf']) {

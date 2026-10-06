@@ -104,6 +104,43 @@
 
   // ---------- rendering ----------
 
+  const CONTEXT_SHOWN = 0.5;
+  const CONTEXT_WARN = 0.8;
+
+  function money(usd) {
+    if (usd >= 1000) return `$${(usd / 1000).toFixed(1)}k`;
+    return `$${usd.toFixed(usd >= 100 ? 0 : 2)}`;
+  }
+
+  /** Minutes (or hours) left on the prompt cache, or '' once it has expired. */
+  function cacheLeft(expires, now) {
+    const min = Math.ceil((expires - now) / 60000);
+    if (min <= 0) return '';
+    return min >= 60 ? `${Math.floor(min / 60)}h${min % 60 ? ` ${min % 60}m` : ''}` : `${min}m`;
+  }
+
+  // To keep cards light, only what helps decide what to do next: the cost, the context once it is filling up
+  // (time to continue in a new session), and the prompt cache while it is still warm (resuming now is cheap).
+  function statTags(s, now) {
+    const tags = [];
+    if (s.cost >= 0.01) {
+      tags.push(`<span class="tag" title="Cost at Claude API prices, subagents included"><i class="codicon codicon-credit-card"></i>${money(s.cost)}</span>`);
+    }
+    if (s.context >= CONTEXT_SHOWN) {
+      const pct = Math.round(s.context * 100);
+      tags.push(
+        `<span class="tag ctx${s.context >= CONTEXT_WARN ? ' warn' : ''}" title="Context window ${pct}% full at the last request"><i class="codicon codicon-pie-chart"></i>${pct}%</span>`,
+      );
+    }
+    const left = s.cacheExpires ? cacheLeft(s.cacheExpires, now) : '';
+    if (left) {
+      tags.push(
+        `<span class="tag cache" data-expires="${s.cacheExpires}" title="Prompt cache still warm: resuming before it expires reuses it at the cheaper cache-read price"><i class="codicon codicon-watch"></i><span>${left}</span></span>`,
+      );
+    }
+    return tags;
+  }
+
   function renderCard(s, showProject, toks, now) {
     const live = now - s.lastTime < LIVE_MS;
     const ctx = JSON.stringify({
@@ -120,6 +157,7 @@
       s.prNumber
         ? `<button class="tag pr" data-action="openPr" title="Open pull request ${esc(s.prRepository || '')}#${s.prNumber}"><i class="codicon codicon-git-pull-request"></i>#${s.prNumber}</button>`
         : '',
+      ...statTags(s, now),
     ].join('');
     return `
       <div class="card${live ? ' is-live' : ''}" role="listitem" tabindex="-1" data-id="${esc(s.id)}" data-vscode-context='${esc(ctx)}'>
@@ -261,6 +299,11 @@
     const now = Date.now();
     $list.querySelectorAll('time[data-t]').forEach((el) => {
       el.textContent = relative(Number(el.dataset.t), now);
+    });
+    $list.querySelectorAll('.tag.cache[data-expires]').forEach((el) => {
+      const left = cacheLeft(Number(el.dataset.expires), now);
+      if (left) el.lastElementChild.textContent = left;
+      else el.remove();
     });
   }
 

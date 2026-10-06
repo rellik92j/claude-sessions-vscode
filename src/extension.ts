@@ -60,7 +60,7 @@ function gitStatus(cwd: string): Promise<string | undefined> {
 export function activate(context: vscode.ExtensionContext): void {
   const store = new SessionStore(projectsDir());
   const model = new SessionModel(store);
-  const transcripts = new TranscriptPanels(context.extensionUri, hasClaudeCode);
+  const transcripts = new TranscriptPanels(context.extensionUri, hasClaudeCode, model);
 
   /**
    * Commands receive a SessionInfo (from the transcript page or quick pick), a webview context
@@ -173,8 +173,11 @@ export function activate(context: vscode.ExtensionContext): void {
     terminal.sendText(`${command} --resume ${session.id}`);
   };
 
-  /** Starts a new CLI session whose first prompt is a handoff of where this one left off. */
-  const continueInNewSession = async (session: SessionInfo) => {
+  /**
+   * Starts a new CLI session whose first prompt is a handoff of where this one left off, optionally with a model
+   * and effort that override the user's Claude Code settings.
+   */
+  const continueInNewSession = async (session: SessionInfo, overrides: Overrides = {}) => {
     const cwd = projectPath(session);
     const hasCwd = existsSync(cwd);
     if (!hasCwd) {
@@ -195,7 +198,14 @@ export function activate(context: vscode.ExtensionContext): void {
     const terminal = vscode.window.createTerminal({
       ...claudeTerminalOptions(`Claude Code · Continued: ${session.title.slice(0, 30)}`, hasCwd ? cwd : undefined),
       shellPath,
-      shellArgs: [...shellArgs, '--name', `Continued: ${session.title}`, handoff],
+      shellArgs: [
+        ...shellArgs,
+        ...(overrides.model ? ['--model', overrides.model] : []),
+        ...(overrides.effort ? ['--effort', overrides.effort] : []),
+        '--name',
+        `Continued: ${session.title}`,
+        handoff,
+      ],
     });
     terminal.show();
   };
@@ -239,7 +249,16 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('claudeSessions.showCurrentWorkspaceOnly', () => setConfig('currentWorkspaceOnly', true)),
     vscode.commands.registerCommand('claudeSessions.showAll', () => setConfig('currentWorkspaceOnly', false)),
     vscode.commands.registerCommand('claudeSessions.resume', withSession(resume)),
-    vscode.commands.registerCommand('claudeSessions.continueInNewSession', withSession(continueInNewSession)),
+    vscode.commands.registerCommand('claudeSessions.continueInNewSession', withSession((s) => continueInNewSession(s))),
+    vscode.commands.registerCommand(
+      'claudeSessions.continueInNewSessionWithModel',
+      withSession(async (s) => {
+        const overrides = await pickOverrides(s);
+        if (overrides) {
+          await continueInNewSession(s, overrides);
+        }
+      }),
+    ),
     vscode.commands.registerCommand('claudeSessions.openInClaudeCode', withSession(openInClaudeCode)),
     // Optional arguments: search words to highlight in the transcript, and true to open it in its own tab
     // rather than the shared preview tab.
@@ -286,6 +305,58 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   model.reload();
+}
+
+/** CLI flags for a new session; undefined fields keep the user's Claude Code settings. */
+interface Overrides {
+  model?: string;
+  effort?: string;
+}
+
+interface ValuePick extends vscode.QuickPickItem {
+  value?: string;
+}
+
+const OTHER_MODEL = '\0other';
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+/** Asks for the model, then the effort, of a continued session. Undefined when either step is cancelled. */
+async function pickOverrides(session: SessionInfo): Promise<Overrides | undefined> {
+  const title = 'Continue in New Session';
+  const usedHere = 'used by this session';
+  // Aliases always mean the latest model of each family, so the list doesn't go stale.
+  const models: ValuePick[] = [
+    { label: '$(settings-gear) Default', description: 'whatever your Claude Code settings say' },
+    { label: 'Opus', description: 'opus · latest Opus', value: 'opus' },
+    { label: 'Sonnet', description: 'sonnet · latest Sonnet', value: 'sonnet' },
+    { label: 'Haiku', description: 'haiku · latest Haiku', value: 'haiku' },
+    { label: 'Fable', description: 'fable · latest Fable', value: 'fable' },
+    ...(session.model ? [{ label: session.model, description: usedHere, value: session.model }] : []),
+    { label: '$(edit) Other model…', description: 'enter a model name', value: OTHER_MODEL },
+  ];
+  const model = await vscode.window.showQuickPick(models, { title: `${title} (1/2): model`, placeHolder: 'Model for the new session' });
+  if (!model) {
+    return undefined;
+  }
+  let modelValue = model.value;
+  if (modelValue === OTHER_MODEL) {
+    modelValue = (
+      await vscode.window.showInputBox({ title, prompt: 'Model alias or full name, as for claude --model', placeHolder: 'claude-opus-5-5' })
+    )?.trim();
+    if (!modelValue) {
+      return undefined;
+    }
+  }
+  const sessionEffort = session.usage?.effort;
+  const efforts: ValuePick[] = [
+    { label: '$(settings-gear) Default', description: 'whatever your Claude Code settings say' },
+    ...EFFORTS.map((e) => ({ label: e, description: e === sessionEffort ? usedHere : undefined, value: e })),
+  ];
+  const effort = await vscode.window.showQuickPick(efforts, { title: `${title} (2/2): effort`, placeHolder: 'Effort level for the new session' });
+  if (!effort) {
+    return undefined;
+  }
+  return { model: modelValue, effort: effort.value };
 }
 
 interface SessionPick extends vscode.QuickPickItem {

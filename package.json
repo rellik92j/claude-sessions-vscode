@@ -86,6 +86,11 @@
         "icon": "$(arrow-circle-right)"
       },
       {
+        "command": "claudeSessions.continueInNewSessionWithModel",
+        "title": "Continue in New Session with Model…",
+        "category": "Claude Sessions"
+      },
+      {
         "command": "claudeSessions.openInClaudeCode",
         "title": "Open in Claude Code Chat",
         "category": "Claude Sessions",
@@ -179,6 +184,10 @@
           "when": "false"
         },
         {
+          "command": "claudeSessions.continueInNewSessionWithModel",
+          "when": "false"
+        },
+        {
           "command": "claudeSessions.openTranscript",
           "when": "false"
         },
@@ -223,24 +232,29 @@
           "group": "1_main@2"
         },
         {
+          "command": "claudeSessions.continueInNewSessionWithModel",
+          "when": "webviewId == 'claudeSessions.list' && webviewSection == 'session'",
+          "group": "1_main@3"
+        },
+        {
           "command": "claudeSessions.openInClaudeCode",
           "when": "webviewId == 'claudeSessions.list' && webviewSection == 'session' && claudeSessions.hasClaudeCode",
-          "group": "1_main@3"
+          "group": "1_main@4"
         },
         {
           "command": "claudeSessions.openTranscript",
           "when": "webviewId == 'claudeSessions.list' && webviewSection == 'session'",
-          "group": "1_main@4"
+          "group": "1_main@5"
         },
         {
           "command": "claudeSessions.openTranscriptInNewTab",
           "when": "webviewId == 'claudeSessions.list' && webviewSection == 'session'",
-          "group": "1_main@5"
+          "group": "1_main@6"
         },
         {
           "command": "claudeSessions.openPr",
           "when": "webviewId == 'claudeSessions.list' && webviewSection == 'session' && sessionHasPr",
-          "group": "1_main@6"
+          "group": "1_main@7"
         },
         {
           "command": "claudeSessions.openRawFile",
