@@ -139,10 +139,21 @@
         "title": "Focus Session Search",
         "category": "Claude Sessions",
         "icon": "$(search)"
+      },
+      {
+        "command": "claudeSessions.openOverview",
+        "title": "Open Overview",
+        "category": "Claude Sessions",
+        "icon": "$(dashboard)"
       }
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "claudeSessions.openOverview",
+          "when": "view == claudeSessions.list",
+          "group": "navigation@0"
+        },
         {
           "command": "claudeSessions.focusSearch",
           "when": "view == claudeSessions.list",

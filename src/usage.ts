@@ -65,6 +65,12 @@ export function modelKey(model: string): string {
     .replace(/-\d{8}$/, '');
 }
 
+/** Local calendar day of a time, as "2026-10-05". */
+export function dayKey(time: number): string {
+  const d = new Date(time);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function priceFor(model: string): Price | undefined {
   return PRICES[modelKey(model)];
 }
@@ -95,6 +101,8 @@ export interface UsageSummary {
   cache?: { lastRequest: number; ttlMs: number };
   /** Effort level of the last request, when the log records it. */
   effort?: string;
+  /** Cost by local day ("2026-10-05") and model price key, for the overview; requests with no time are left out. */
+  daily: Record<string, Record<string, number>>;
 }
 
 interface Request {
@@ -163,6 +171,7 @@ export class UsageCollector {
     const tokens = zero();
     const costs = { ...zero(), webSearch: 0 };
     let subagentCost = 0;
+    const daily: Record<string, Record<string, number>> = {};
     const unpriced = new Set<string>();
     let last: Request | undefined;
     let ttlMs: number | undefined;
@@ -200,6 +209,11 @@ export class UsageCollector {
       } else {
         unpriced.add(req.model);
       }
+      if (req.time !== undefined && cost > 0) {
+        const day = (daily[dayKey(req.time)] ??= {});
+        const key = modelKey(req.model);
+        day[key] = (day[key] ?? 0) + cost;
+      }
       if (req.subagent) {
         subagentCost += cost;
         continue;
@@ -211,7 +225,7 @@ export class UsageCollector {
     }
 
     const cost = costs.input + costs.cacheWrite5m + costs.cacheWrite1h + costs.cacheRead + costs.output + costs.webSearch;
-    const summary: UsageSummary = { tokens, costs, cost, subagentCost, requests: this.requests.size, unpriced: [...unpriced], effort: this.effort };
+    const summary: UsageSummary = { tokens, costs, cost, subagentCost, requests: this.requests.size, unpriced: [...unpriced], effort: this.effort, daily };
     if (last) {
       const u = last.usage;
       const used = num(u.input_tokens) + num(u.cache_read_input_tokens) + num(u.cache_creation_input_tokens);

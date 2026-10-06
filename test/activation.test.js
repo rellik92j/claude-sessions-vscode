@@ -241,8 +241,31 @@ test('bundled extension activates, fills the sidebar, and renders a transcript',
     await new Promise((r) => setTimeout(r, 300));
     assert.equal(state.terminals.length, 0);
 
+    // Overview: one editor tab, filled when its page is ready, for the range the page asks for.
+    await state.commands['claudeSessions.openOverview']();
+    await state.commands['claudeSessions.openOverview']();
+    const overview = state.panels[state.panels.length - 1];
+    assert.equal(state.panels.length, 6, 'overview opened once');
+    assert.match(overview.webview.html, /overview\.js/);
+    state.panelPosts.length = 0;
+    overview.onMessage({ type: 'ready', range: 7 });
+    const ov = state.panelPosts.filter((m) => m.type === 'state').pop();
+    assert.ok(ov, 'state posted to overview');
+    assert.equal(ov.overview.range, 7);
+    assert.equal(ov.overview.totals.sessions, 1);
+    assert.ok(Math.abs(ov.overview.totals.cost - 0.17004) < 1e-6);
+    assert.match(ov.overview.projects[0].name, /repo/);
+    assert.deepEqual(ov.overview.models.map((m) => m.model), ['opus-5-5']);
+    // Project filter: keys from allProjects; unknown ones are dropped.
+    const repoKey = ov.overview.allProjects[0].key;
+    overview.onMessage({ type: 'setFilters', range: 30, projects: [repoKey, 'nowhere'] });
+    const filtered = state.panelPosts.filter((m) => m.type === 'state').pop().overview;
+    assert.equal(filtered.range, 30);
+    assert.deepEqual(filtered.filter, [repoKey]);
+    assert.equal(filtered.totals.sessions, 1);
+
     // Assets referenced by the webviews must exist on disk.
-    for (const f of ['media/sidebar.js', 'media/sidebar.css', 'media/transcript.js', 'media/transcript.css', 'node_modules/@vscode/codicons/dist/codicon.css', 'node_modules/@vscode/codicons/dist/codicon.ttf']) {
+    for (const f of ['media/sidebar.js', 'media/sidebar.css', 'media/transcript.js', 'media/transcript.css', 'media/overview.js', 'media/overview.css','node_modules/@vscode/codicons/dist/codicon.css', 'node_modules/@vscode/codicons/dist/codicon.ttf']) {
       assert.ok(fs.existsSync(path.join(extDir, f)), `${f} exists`);
     }
   } finally {

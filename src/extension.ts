@@ -9,6 +9,7 @@ import { GroupBy, projectPath, SessionModel } from './model';
 import { isEmptyQuery, parseQuery } from './query';
 import { SessionInfo } from './sessionParser';
 import { defaultProjectsDir, SessionStore, sortTime } from './sessionStore';
+import { OverviewPanel } from './overviewPanel';
 import { SidebarView } from './sidebarView';
 import { TranscriptPanels } from './transcriptPanel';
 
@@ -61,6 +62,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const store = new SessionStore(projectsDir());
   const model = new SessionModel(store);
   const transcripts = new TranscriptPanels(context.extensionUri, hasClaudeCode, model);
+  const overview = new OverviewPanel(context.extensionUri, model);
 
   /**
    * Commands receive a SessionInfo (from the transcript page or quick pick), a webview context
@@ -243,6 +245,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('claudeSessions.refresh', () => model.reload()),
     vscode.commands.registerCommand('claudeSessions.focusSearch', () => sidebar.focusSearch()),
+    vscode.commands.registerCommand('claudeSessions.openOverview', () => overview.show()),
     vscode.commands.registerCommand('claudeSessions.search', () => searchSessions(model)),
     vscode.commands.registerCommand('claudeSessions.groupByProject', () => setConfig('groupBy', 'project')),
     vscode.commands.registerCommand('claudeSessions.groupByDate', () => setConfig('groupBy', 'date')),
