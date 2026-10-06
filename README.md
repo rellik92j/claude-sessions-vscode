@@ -2,7 +2,7 @@
 
 **Find, read and pick up any Claude Code session without leaving VS Code.**
 
-[Claude Code](https://claude.com/claude-code) saves every conversation you have with it, but finding an old one means scrolling through `claude --resume` and guessing from the first line. Claude Sessions adds a sidebar that shows all of your sessions across every project. You can search everything you and Claude said, read any conversation as a chat transcript, see what each session used and cost, and resume it in one click.
+[Claude Code](https://claude.com/claude-code) saves every conversation you have with it, but finding an old one means scrolling through `claude --resume` and guessing from the first line. Claude Sessions adds a sidebar that shows all of your sessions across every project. You can search everything you and Claude said, read any conversation as a chat transcript, see what each session used and cost (or chart what all of them cost, by day, model and project), and resume it in one click.
 
 ![The Claude Sessions sidebar next to a transcript](docs/images/overview.png)
 
@@ -68,7 +68,18 @@ The numbers are worked out on your machine from the token counts in the session 
 
 ### See all your sessions at a glance
 
-Click the dashboard button at the top of the sidebar, or run **Claude Sessions: Open Overview**, to open a summary in an editor tab. For the last 7, 30 or 90 days, or all time, it shows the total cost, sessions, prompts and active days, a chart of cost per day, each project's and each model's share, and the most expensive sessions. Use the **Projects** filter to narrow it to one or more projects, or click a project's name in the table to show just that one. Hover a bar for that day's numbers, and click a session to read its transcript. Cost is counted on the day each request was made, so a session that ran over several days is split across them. The overview follows the sidebar's **Workspace** filter.
+![The overview: totals, cost per day split by model, projects, models and recent sessions](docs/images/overview-page.png)
+
+Click the dashboard button at the top of the sidebar, or run **Claude Sessions: Open Overview**, to open a summary in an editor tab. For the last 7, 30 or 90 days, or all time, it shows:
+
+- **Totals:** cost at API prices, sessions, prompts, projects and active days.
+- **Cost per day:** each bar is split by model or by project, whichever you pick under **Color by** (or **Total** for plain bars), with a legend below. Hover a bar for that day's breakdown. A model or project keeps its color when you change the range.
+- **Projects and Models:** each one's sessions, prompts, cost and share.
+- **Sessions:** the most recently active, or switch to the most expensive. Click one to read its transcript.
+
+The overview starts with the projects in your current workspace. Use the **Projects** menu to switch to **All projects** or tick the ones you want, or click a project's name in the table to show just that one. The page remembers your range, projects and color choice.
+
+Cost is counted on the day each request was made, so a session that ran over several days is split across them.
 
 ### Pick up where you left off
 
@@ -93,7 +104,7 @@ Claude Sessions isn't on the VS Code Marketplace yet. To install it:
    Or, from a terminal:
 
    ```sh
-   code --install-extension claude-sessions-0.2.7.vsix
+   code --install-extension claude-sessions-0.2.8.vsix
    ```
 
 3. Click the **Claude Sessions** icon in the Activity Bar.
@@ -117,7 +128,7 @@ In the sidebar:
 
 In a transcript: F3 / Shift+F3 step through search matches, and Esc clears them.
 
-The **Claude Sessions: Search Sessions…** command in the Command Palette searches transcripts too.
+The **Claude Sessions: Search Sessions…** command in the Command Palette searches transcripts too, and **Claude Sessions: Open Overview** opens the overview.
 
 ## Settings
 
@@ -141,6 +152,21 @@ npm run package   # build claude-sessions-<version>.vsix
 ```
 
 Press F5 with this folder open to run the extension in a development host.
+
+How the code is laid out:
+
+| Path | What it does |
+| --- | --- |
+| `src/extension.ts` | Activation, commands, file watching, resuming and continuing sessions |
+| `src/sessionStore.ts`, `src/sessionParser.ts` | Find and parse the session logs (cached by file size and time) |
+| `src/usage.ts` | Tokens, API-priced cost (also by day and model), context fill and prompt-cache state |
+| `src/model.ts`, `src/query.ts` | Loaded sessions, grouping and filters, and the search syntax |
+| `src/sidebarView.ts`, `media/sidebar.*` | The sidebar webview |
+| `src/transcriptPanel.ts`, `src/markdown.ts`, `media/transcript.*` | Transcript tabs |
+| `src/overview.ts`, `src/overviewPanel.ts`, `media/overview.*` | The overview tab: `overview.ts` builds the numbers, the panel picks the projects |
+| `src/handoff.ts` | The prompt that starts Continue in New Session |
+
+Files without VS Code imports (`sessionParser`, `usage`, `query`, `overview`, `handoff`, `format`) are unit tested directly from `out/`; `test/activation.test.js` loads the bundled extension against a fake VS Code API and drives the webviews' messages.
 
 ## License
 

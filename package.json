@@ -2,7 +2,7 @@
   "name": "claude-sessions",
   "displayName": "Claude Sessions",
   "description": "Browse, search, read and resume all of your Claude Code sessions from the VS Code sidebar.",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "publisher": "local",
   "license": "MIT",
   "repository": {

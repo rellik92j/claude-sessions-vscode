@@ -1,14 +1,20 @@
 import { randomBytes } from 'crypto';
 import * as vscode from 'vscode';
-import { SessionModel } from './model';
-import { buildOverview, OVERVIEW_RANGES, OverviewRange } from './overview';
+import { isInside } from './format';
+import { projectPath, SessionModel, workspaceFolderPaths } from './model';
+import { buildOverview, OVERVIEW_RANGES, OverviewRange, projectKey } from './overview';
+
+/** Which projects the overview covers: those in the open workspace folders, all, or a pick. */
+type Scope = 'workspace' | 'all' | 'pick';
+const SCOPES: Scope[] = ['workspace', 'all', 'pick'];
 
 /** The overview: one editor tab summarising all sessions, kept current as logs change. */
 export class OverviewPanel {
   private panel: vscode.WebviewPanel | undefined;
   private ready = false;
   private range: OverviewRange = 30;
-  /** Keys of the projects to include; empty for all. */
+  private scope: Scope = 'workspace';
+  /** Keys of the picked projects, for the 'pick' scope. */
   private projects: string[] = [];
 
   constructor(
@@ -48,11 +54,27 @@ export class OverviewPanel {
     if (!this.panel || !this.ready) {
       return;
     }
+    // The overview has its own project filter, so it ignores the sidebar's Workspace filter.
+    const sessions = this.model.visibleSessions(false);
+    const folders = workspaceFolderPaths();
+    const workspaceKeys = [
+      ...new Set(sessions.filter((s) => folders.some((f) => isInside(projectPath(s), f))).map(projectKey)),
+    ];
+    const known = new Set(sessions.map(projectKey));
+    let scope = this.scope;
+    // With no folder open there is no workspace to show, and a pick whose projects have all gone shows everything.
+    if ((scope === 'workspace' && !folders.length) || (scope === 'pick' && !this.projects.some((k) => known.has(k)))) {
+      scope = 'all';
+    }
+    const filter = scope === 'workspace' ? workspaceKeys : scope === 'pick' ? this.projects : undefined;
     this.panel.webview.postMessage({
       type: 'state',
       loaded: this.model.isLoaded,
-      workspaceOnly: this.model.workspaceOnly,
-      overview: buildOverview(this.model.visibleSessions(), this.range, Date.now(), this.projects),
+      scope,
+      hasWorkspace: folders.length > 0,
+      workspaceName: vscode.workspace.name,
+      workspaceKeys,
+      overview: buildOverview(sessions, this.range, Date.now(), filter),
     });
   }
 
@@ -62,6 +84,9 @@ export class OverviewPanel {
       case 'setFilters':
         if (OVERVIEW_RANGES.includes(msg.range)) {
           this.range = msg.range;
+        }
+        if (SCOPES.includes(msg.scope)) {
+          this.scope = msg.scope;
         }
         if (Array.isArray(msg.projects)) {
           this.projects = msg.projects.filter((k: unknown): k is string => typeof k === 'string');
@@ -83,9 +108,6 @@ export class OverviewPanel {
         if (typeof msg.projectPath === 'string') {
           vscode.commands.executeCommand('claudeSessions.revealFolder', { projectPath: msg.projectPath });
         }
-        break;
-      case 'showAll':
-        vscode.commands.executeCommand('claudeSessions.showAll');
         break;
     }
   }

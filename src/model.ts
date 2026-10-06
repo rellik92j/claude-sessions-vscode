@@ -83,12 +83,13 @@ export class SessionModel {
     this.emitter.fire();
   }
 
-  visibleSessions(): SessionInfo[] {
+  /** Sessions the sidebar shows; `workspaceOnly` overrides the sidebar's Workspace filter. */
+  visibleSessions(workspaceOnly = this.workspaceOnly): SessionInfo[] {
     let list = this.sessions;
     if (this.hideEmpty) {
       list = list.filter((s) => s.promptCount > 0 || s.assistantCount > 0 || s.titleSource !== 'none');
     }
-    if (this.workspaceOnly) {
+    if (workspaceOnly) {
       const folders = workspaceFolderPaths();
       list = list.filter((s) => folders.some((f) => isInside(projectPath(s), f)));
     }
