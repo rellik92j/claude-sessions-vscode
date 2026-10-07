@@ -11,6 +11,8 @@
   let sessionSort = saved.sessionSort === 'cost' ? 'cost' : 'recent';
   /** What the chart's bars are split and colored by: 'model', 'project' or 'total'. */
   let colorBy = ['model', 'project', 'total'].includes(saved.colorBy) ? saved.colorBy : 'model';
+  /** Sources shown (claude, copilot-cli, vscode-chat); null until chosen, meaning all of them. */
+  let sources = Array.isArray(saved.sources) ? saved.sources : null;
   let menuQuery = '';
   let state = null;
 
@@ -55,6 +57,8 @@
         </div>
       </div>
       <div class="selected" id="selected"></div>
+      <span class="spacer"></span>
+      <div class="source-chips" id="sources" role="group" aria-label="Show sessions from"></div>
     </div>
     <main id="body"></main>
     <div class="tooltip" id="tip" role="tooltip" hidden></div>`;
@@ -69,6 +73,7 @@
   const $projectItems = document.getElementById('project-items');
   const $projectScopes = document.getElementById('project-scopes');
   const $selected = document.getElementById('selected');
+  const $sources = document.getElementById('sources');
 
   // ---------- helpers ----------
 
@@ -161,9 +166,18 @@
   function renderKpis(o) {
     const t = o.totals;
     const perDay = t.activeDays ? t.cost / t.activeDays : 0;
+    // Only Claude Code logs record token usage, so with other sources shown the cost covers part of the sessions.
+    const mixed = (state.sources || []).some((x) => x.on && x.id !== 'claude');
     return `
       <section class="kpis">
-        ${kpi('Cost', money(t.cost), t.activeDays ? `${money(perDay)} per active day` : '', 'What these sessions would cost at Claude API prices, subagents included')}
+        ${kpi(
+          mixed ? 'Cost <span class="muted">Claude only</span>' : 'Cost',
+          money(t.cost),
+          t.activeDays ? `${money(perDay)} per active day` : '',
+          mixed
+            ? 'What the Claude Code sessions would cost at Claude API prices, subagents included. GitHub Copilot CLI and VS Code Chat logs record no token usage, so they count as $0.'
+            : 'What these sessions would cost at Claude API prices, subagents included',
+        )}
         ${kpi('Sessions', count(t.sessions), t.sessions ? `${money(t.sessions ? t.cost / t.sessions : 0)} each on average` : '')}
         ${kpi('Prompts', count(t.prompts), t.sessions ? `${(t.prompts / t.sessions).toFixed(1)} per session` : '', 'Prompts you typed in these sessions')}
         ${kpi('Projects', count(t.projects), '')}
@@ -315,8 +329,18 @@
 
   // ---------- project filter ----------
 
-  const save = () => vscode.setState({ range, scope, projects, sessionSort, colorBy });
-  const postFilters = () => vscode.postMessage({ type: 'setFilters', range, scope, projects });
+  const save = () => vscode.setState({ range, scope, projects, sessionSort, colorBy, sources });
+  const postFilters = () => vscode.postMessage({ type: 'setFilters', range, scope, projects, ...(sources ? { sources } : {}) });
+
+  function renderSources() {
+    const list = state?.sources || [];
+    $sources.innerHTML = list
+      .map(
+        (x) =>
+          `<button class="chip${x.on ? ' on' : ''}" data-source="${esc(x.id)}" aria-pressed="${x.on}" title="${esc(x.title)}"><i class="codicon codicon-${esc(x.icon)}"></i><span>${esc(x.label)}</span></button>`,
+      )
+      .join('');
+  }
 
   function setScope(next, picked = projects) {
     scope = next;
@@ -418,6 +442,7 @@
       return;
     }
     renderFilter();
+    renderSources();
     const o = state.overview;
     $sub.textContent = o.from === o.to ? longDay(o.to) : `${longDay(o.from)} – ${longDay(o.to)}`;
     if (!o.totals.sessions) {
@@ -510,6 +535,22 @@
       postFilters();
       return;
     }
+    const sourceBtn = e.target.closest('[data-source]');
+    if (sourceBtn && state) {
+      const on = new Set(state.sources.filter((x) => x.on).map((x) => x.id));
+      const id = sourceBtn.dataset.source;
+      if (on.has(id)) {
+        if (on.size === 1) return;
+        on.delete(id);
+      } else {
+        on.add(id);
+      }
+      // Sources without a chip (no sessions yet) stay on.
+      sources = ['claude', 'copilot-cli', 'vscode-chat'].filter((s) => on.has(s) || !state.sources.some((x) => x.id === s));
+      save();
+      postFilters();
+      return;
+    }
     const scopeBtn = e.target.closest('[data-scope]');
     if (scopeBtn) {
       openMenu(false);
@@ -583,5 +624,5 @@
   });
 
   render();
-  vscode.postMessage({ type: 'ready', range, scope, projects });
+  vscode.postMessage({ type: 'ready', range, scope, projects, ...(sources ? { sources } : {}) });
 })();

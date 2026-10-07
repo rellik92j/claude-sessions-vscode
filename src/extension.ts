@@ -5,10 +5,11 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { formatRelative, isInside } from './format';
 import { buildHandoff, collectHandoffFacts } from './handoff';
-import { GroupBy, projectPath, SessionModel } from './model';
+import { GroupBy, projectName, projectPath, SessionModel } from './model';
 import { isEmptyQuery, parseQuery } from './query';
 import { SessionInfo } from './sessionParser';
 import { defaultProjectsDir, SessionStore, sortTime } from './sessionStore';
+import { isClaude, sessionKey, SOURCES, sourceOf, toSources } from './sources';
 import { OverviewPanel } from './overviewPanel';
 import { SidebarView } from './sidebarView';
 import { TranscriptPanels } from './transcriptPanel';
@@ -27,17 +28,36 @@ function projectsDir(): string {
 const hasClaudeCode = () => !!vscode.extensions.getExtension(CLAUDE_CODE_EXTENSION);
 
 /** Matches the Claude Code extension's "Open in Terminal": a terminal tab in the editor area with the Claude logo. */
-function claudeTerminalOptions(name: string, cwd: string | undefined): vscode.TerminalOptions {
+function claudeTerminalOptions(name: string, cwd: string | undefined, iconPath?: vscode.TerminalOptions['iconPath']): vscode.TerminalOptions {
   const inEditor = config().get<string>('terminalLocation', 'editor') === 'editor';
   const claudeCode = vscode.extensions.getExtension(CLAUDE_CODE_EXTENSION);
   return {
     name,
     cwd,
-    iconPath: claudeCode
-      ? vscode.Uri.joinPath(claudeCode.extensionUri, 'resources', 'claude-logo.svg')
-      : new vscode.ThemeIcon('comment-discussion'),
+    iconPath:
+      iconPath ??
+      (claudeCode
+        ? vscode.Uri.joinPath(claudeCode.extensionUri, 'resources', 'claude-logo.svg')
+        : new vscode.ThemeIcon('comment-discussion')),
     location: inEditor ? { viewColumn: vscode.ViewColumn.Beside } : vscode.TerminalLocation.Panel,
   };
+}
+
+/** The command that resumes a CLI session (Claude Code or GitHub Copilot CLI). */
+function resumeCommand(session: SessionInfo): string {
+  const command = isClaude(session)
+    ? config().get<string>('claudeCommand', 'claude') || 'claude'
+    : config().get<string>('copilotCommand', 'copilot') || 'copilot';
+  return `${command} --resume ${session.id}`;
+}
+
+/**
+ * VS Code's own address for a chat stored in a workspace: vscode-chat-session://local/<base64url session id>. Opening it
+ * shows the chat in an editor, but only in the window whose workspace the chat belongs to.
+ */
+function chatSessionUri(id: string): vscode.Uri {
+  const encoded = Buffer.from(id, 'utf8').toString('base64url');
+  return vscode.Uri.from({ scheme: 'vscode-chat-session', authority: 'local', path: `/${encoded}` });
 }
 
 /**
@@ -73,6 +93,9 @@ export function activate(context: vscode.ExtensionContext): void {
       if ('filePath' in arg && 'id' in arg) {
         return arg as SessionInfo;
       }
+      if ('sessionKey' in arg && typeof arg.sessionKey === 'string') {
+        return model.find(arg.sessionKey);
+      }
       if ('sessionId' in arg && typeof arg.sessionId === 'string') {
         return model.find(arg.sessionId);
       }
@@ -95,6 +118,11 @@ export function activate(context: vscode.ExtensionContext): void {
     model.workspaceOnly = config().get<boolean>('currentWorkspaceOnly', false);
     model.hideEmpty = config().get<boolean>('hideEmptySessions', true);
   };
+  // The sources setting is the default; the sidebar's chips change the model's copy until the setting changes again.
+  const applySources = () => {
+    model.sources = new Set(toSources(config().get<unknown>('sources')));
+  };
+  applySources();
   const updateClaudeCodeContext = () =>
     vscode.commands.executeCommand('setContext', 'claudeSessions.hasClaudeCode', hasClaudeCode());
   updateClaudeCodeContext();
@@ -131,6 +159,9 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       applyConfig();
+      if (e.affectsConfiguration(`${CONFIG}.sources`)) {
+        applySources();
+      }
       if (e.affectsConfiguration(`${CONFIG}.projectsDir`)) {
         store.setProjectsDir(projectsDir());
         watch();
@@ -153,26 +184,65 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
+  /** Opens a VS Code chat in this window when it belongs here; otherwise offers its folder's window. */
+  const openChat = async (session: SessionInfo) => {
+    // Chats live in workspaceStorage/<hash>/chatSessions/; this extension's own storage sits in the same <hash> folder.
+    const chatWorkspace = path.basename(path.dirname(path.dirname(session.filePath)));
+    const thisWorkspace = context.storageUri && path.basename(path.dirname(context.storageUri.fsPath));
+    if (chatWorkspace === thisWorkspace) {
+      try {
+        await vscode.commands.executeCommand('vscode.open', chatSessionUri(session.id));
+        return;
+      } catch {
+        // Fall through to the chat view.
+      }
+      await vscode.commands.executeCommand('workbench.action.chat.open');
+      vscode.window.showInformationMessage(`Couldn't open the chat directly. Find "${session.title}" in the chat history.`);
+      return;
+    }
+    const folder = projectPath(session);
+    const choice = await vscode.window.showInformationMessage(
+      folder
+        ? `This chat belongs to ${folder}. VS Code opens a chat only in the window of its own folder.`
+        : 'This chat was started in a window without a folder, so VS Code can only show it there.',
+      ...(folder && existsSync(folder) ? ['Open Folder in New Window'] : []),
+      'Read Transcript',
+    );
+    if (choice === 'Open Folder in New Window') {
+      await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(folder), { forceNewWindow: true });
+    } else if (choice === 'Read Transcript') {
+      await transcripts.open(session);
+    }
+  };
+
   const resume = (session: SessionInfo) => {
-    const existing = sessionTerminals.get(session.id);
+    if (sourceOf(session) === 'vscode-chat') {
+      return openChat(session);
+    }
+    const key = sessionKey(session);
+    const existing = sessionTerminals.get(key);
     if (existing && existing.exitStatus === undefined) {
       existing.show();
       return;
     }
+    const tool = SOURCES[sourceOf(session)].label;
     const cwd = projectPath(session);
-    const hasCwd = existsSync(cwd);
+    const hasCwd = !!cwd && existsSync(cwd);
     if (!hasCwd) {
       vscode.window.showWarningMessage(
-        `The session's folder no longer exists (${cwd}). Claude Code looks sessions up by folder, so resuming may fail.`,
+        `The session's folder no longer exists (${cwd || 'unknown'}). ${tool} looks sessions up by folder, so resuming may fail.`,
       );
     }
-    const command = config().get<string>('claudeCommand', 'claude') || 'claude';
     const terminal = vscode.window.createTerminal(
-      claudeTerminalOptions(`Claude Code · ${session.title.slice(0, 40)}`, hasCwd ? cwd : undefined),
+      claudeTerminalOptions(
+        `${tool} · ${session.title.slice(0, 40)}`,
+        hasCwd ? cwd : undefined,
+        isClaude(session) ? undefined : new vscode.ThemeIcon(SOURCES[sourceOf(session)].icon),
+      ),
     );
-    sessionTerminals.set(session.id, terminal);
+    sessionTerminals.set(key, terminal);
     terminal.show();
-    terminal.sendText(`${command} --resume ${session.id}`);
+    terminal.sendText(resumeCommand(session));
   };
 
   /**
@@ -244,6 +314,19 @@ export function activate(context: vscode.ExtensionContext): void {
     return pickSession(model).then((picked) => picked && fn(picked));
   };
 
+  /** For commands that only make sense for Claude Code sessions: the picker lists only those, and others are refused. */
+  const withClaudeSession = (what: string, fn: (s: SessionInfo) => unknown) => (arg: unknown) => {
+    const s = toSession(arg);
+    if (s && !isClaude(s)) {
+      vscode.window.showInformationMessage(`${what} works only for Claude Code sessions.`);
+      return;
+    }
+    if (s) {
+      return fn(s);
+    }
+    return pickSession(model, isClaude).then((picked) => picked && fn(picked));
+  };
+
   context.subscriptions.push(
     vscode.commands.registerCommand('claudeSessions.refresh', () => model.reload()),
     vscode.commands.registerCommand('claudeSessions.focusSearch', () => sidebar.focusSearch()),
@@ -254,17 +337,20 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('claudeSessions.showCurrentWorkspaceOnly', () => setConfig('currentWorkspaceOnly', true)),
     vscode.commands.registerCommand('claudeSessions.showAll', () => setConfig('currentWorkspaceOnly', false)),
     vscode.commands.registerCommand('claudeSessions.resume', withSession(resume)),
-    vscode.commands.registerCommand('claudeSessions.continueInNewSession', withSession((s) => continueInNewSession(s))),
+    vscode.commands.registerCommand(
+      'claudeSessions.continueInNewSession',
+      withClaudeSession('Continue in New Session', (s) => continueInNewSession(s)),
+    ),
     vscode.commands.registerCommand(
       'claudeSessions.continueInNewSessionWithModel',
-      withSession(async (s) => {
+      withClaudeSession('Continue in New Session', async (s) => {
         const overrides = await pickOverrides(s);
         if (overrides) {
           await continueInNewSession(s, overrides);
         }
       }),
     ),
-    vscode.commands.registerCommand('claudeSessions.openInClaudeCode', withSession(openInClaudeCode)),
+    vscode.commands.registerCommand('claudeSessions.openInClaudeCode', withClaudeSession('Open in Claude Code Chat', openInClaudeCode)),
     // Optional arguments: search words to highlight in the transcript, and true to open it in its own tab
     // rather than the shared preview tab.
     vscode.commands.registerCommand('claudeSessions.openTranscript', (arg: unknown, highlight?: unknown, keepOpen?: unknown) =>
@@ -288,9 +374,12 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       'claudeSessions.copyResumeCommand',
       withSession(async (s) => {
-        const command = config().get<string>('claudeCommand', 'claude') || 'claude';
+        if (sourceOf(s) === 'vscode-chat') {
+          vscode.window.showInformationMessage('VS Code chats have no resume command. Use Open in Chat instead.');
+          return;
+        }
         const cwd = projectPath(s);
-        await vscode.env.clipboard.writeText(`cd "${cwd}" && ${command} --resume ${s.id}`);
+        await vscode.env.clipboard.writeText(cwd ? `cd "${cwd}" && ${resumeCommand(s)}` : resumeCommand(s));
         vscode.window.setStatusBarMessage('Copied resume command', 3000);
       }),
     ),
@@ -376,7 +465,7 @@ function toTokens(value: unknown): string[] {
 function toPicks(sessions: SessionInfo[]): SessionPick[] {
   return sessions.map((s) => ({
     label: s.title,
-    description: `${path.basename(projectPath(s))} · ${formatRelative(sortTime(s))}`,
+    description: [isClaude(s) ? '' : SOURCES[sourceOf(s)].short, projectName(projectPath(s)), formatRelative(sortTime(s))].filter(Boolean).join(' · '),
     detail: [s.firstPrompt, s.lastPrompt !== s.firstPrompt ? s.lastPrompt : undefined]
       .filter(Boolean)
       .map((p) => p!.replace(/\s+/g, ' ').slice(0, 200))
@@ -385,12 +474,13 @@ function toPicks(sessions: SessionInfo[]): SessionPick[] {
   }));
 }
 
-async function pickSession(model: SessionModel): Promise<SessionInfo | undefined> {
+async function pickSession(model: SessionModel, filter?: (s: SessionInfo) => boolean): Promise<SessionInfo | undefined> {
   if (!model.allSessions.length) {
     await model.reload();
   }
-  const picked = await vscode.window.showQuickPick(toPicks(model.visibleSessions()), {
-    placeHolder: 'Select a Claude Code session',
+  const sessions = model.visibleSessions();
+  const picked = await vscode.window.showQuickPick(toPicks(filter ? sessions.filter(filter) : sessions), {
+    placeHolder: filter ? 'Select a Claude Code session' : 'Select a session',
     matchOnDescription: true,
     matchOnDetail: true,
   });
@@ -404,11 +494,11 @@ async function searchSessions(model: SessionModel): Promise<void> {
     await model.reload();
   }
   const qp = vscode.window.createQuickPick<SessionPick>();
-  qp.placeholder = 'Search sessions and transcripts ("exact phrase", -exclude, a OR b) — Enter opens the transcript';
+  qp.placeholder = 'Search sessions and transcripts ("exact phrase", -exclude, a OR b, source:copilot) — Enter opens the transcript';
   qp.matchOnDescription = true;
   qp.matchOnDetail = true;
   const basePicks = toPicks(model.visibleSessions()).map((p) => ({ ...p, buttons: [RESUME_BUTTON] }));
-  const byId = new Map(basePicks.map((p) => [p.session.id, p]));
+  const byKey = new Map(basePicks.map((p) => [sessionKey(p.session), p]));
   qp.items = basePicks;
   // The quick pick's own fuzzy filter knows neither the query syntax nor the transcripts, so while searching the
   // list holds only our matches, all marked alwaysShow so the built-in filter leaves them alone. Sessions found
@@ -421,11 +511,11 @@ async function searchSessions(model: SessionModel): Promise<void> {
     }
     qp.items = model
       .search(q, (s) => {
-        const p = byId.get(s.id);
+        const p = byKey.get(sessionKey(s));
         return p ? [p.label, p.description, p.detail].join('\0') : '';
       })
       .flatMap((hit) => {
-        const p = byId.get(hit.session.id);
+        const p = byKey.get(sessionKey(hit.session));
         return p ? [{ ...p, alwaysShow: true, detail: hit.snippet ? `$(quote) ${hit.snippet}` : p.detail }] : [];
       });
   });

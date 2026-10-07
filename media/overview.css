@@ -406,3 +406,7 @@ body.vscode-dark .c-o, body.vscode-high-contrast:not(.vscode-high-contrast-light
 .tag .codicon { font-size: 12px; }
 
 .empty-state { padding: 48px 0; text-align: center; }
+
+/* Source chips: which tools' sessions the overview covers. */
+.source-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.kpi-label .muted { font-weight: normal; }

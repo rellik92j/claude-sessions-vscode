@@ -31,13 +31,15 @@
         <span class="spacer"></span>
         <button class="icon-btn" id="refresh" title="Refresh" aria-label="Refresh"><i class="codicon codicon-refresh"></i></button>
       </div>
+      <div class="sources" id="sources" role="group" aria-label="Show sessions from" hidden></div>
       <div class="summary" id="summary"></div>
     </header>
-    <main id="list" class="list" role="list" aria-label="Claude Code sessions"></main>`;
+    <main id="list" class="list" role="list" aria-label="Sessions"></main>`;
 
   const $q = document.getElementById('q');
   const $list = document.getElementById('list');
   const $summary = document.getElementById('summary');
+  const $sources = document.getElementById('sources');
   $q.value = query;
 
   const save = () => vscode.setState({ collapsed, query });
@@ -143,13 +145,18 @@
 
   function renderCard(s, showProject, toks, now) {
     const live = now - s.lastTime < LIVE_MS;
+    const info = state.sourceInfo[s.source] || state.sourceInfo.claude;
+    const claude = s.source === 'claude';
     const ctx = JSON.stringify({
       webviewSection: 'session',
-      sessionId: s.id,
+      sessionKey: s.id,
+      sessionSource: s.source,
       sessionHasPr: !!s.prNumber,
       preventDefaultContextMenuItems: true,
     });
     const meta = [
+      // Which tool the session is from, once there is more than one to tell apart.
+      state.sources.length ? `<span class="tag source ${esc(s.source)}" title="${esc(info.label)}"><i class="codicon codicon-${esc(info.icon)}"></i>${esc(info.short)}</span>` : '',
       showProject ? `<span class="tag project" style="--hue:${s.hue}"><span class="swatch"></span>${hl(s.project, toks)}</span>` : '',
       s.agent ? `<span class="tag agent" title="Agent"><i class="codicon codicon-hubot"></i>${hl(s.agent, toks)}</span>` : '',
       s.branch ? `<span class="tag" title="Git branch"><i class="codicon codicon-git-branch"></i>${hl(s.branch, toks)}</span>` : '',
@@ -169,9 +176,9 @@
         ${excerptHtml(s, toks)}
         <div class="meta">${meta}</div>
         <div class="card-actions">
-          <button class="icon-btn accent" data-action="resume" title="Resume in Claude Code terminal (Ctrl+Enter)"><i class="codicon codicon-play"></i></button>
-          <button class="icon-btn" data-action="continueInNewSession" title="Continue in a new session: starts the CLI with a handoff of where this one left off"><i class="codicon codicon-arrow-circle-right"></i></button>
-          ${state.hasClaudeCode ? '<button class="icon-btn" data-action="openInClaudeCode" title="Open in Claude Code chat"><i class="codicon codicon-comment-discussion"></i></button>' : ''}
+          <button class="icon-btn accent" data-action="resume" title="${esc(info.resumeTitle)} (Ctrl+Enter)"><i class="codicon codicon-${s.source === 'vscode-chat' ? 'chat-sparkle' : 'play'}"></i></button>
+          ${claude ? '<button class="icon-btn" data-action="continueInNewSession" title="Continue in a new session: starts the CLI with a handoff of where this one left off"><i class="codicon codicon-arrow-circle-right"></i></button>' : ''}
+          ${claude && state.hasClaudeCode ? '<button class="icon-btn" data-action="openInClaudeCode" title="Open in Claude Code chat"><i class="codicon codicon-comment-discussion"></i></button>' : ''}
           <button class="icon-btn" data-action="openTranscript" title="Read transcript (Enter)"><i class="codicon codicon-book"></i></button>
           <button class="icon-btn" data-action="copyId" title="Copy session ID"><i class="codicon codicon-copy"></i></button>
         </div>
@@ -224,7 +231,24 @@
       </div>`;
   }
 
+  /** The source chips: All, then one per source with its session count. */
+  function renderSources() {
+    const list = state?.sources || [];
+    $sources.hidden = !list.length;
+    if (!list.length) return;
+    const all = list.every((x) => x.on);
+    $sources.innerHTML =
+      `<button class="chip" data-source="*" aria-pressed="${all}" title="Show sessions from every source">All</button>` +
+      list
+        .map(
+          (x) =>
+            `<button class="chip" data-source="${esc(x.id)}" aria-pressed="${x.on}" title="${esc(x.title)}: click to show or hide, Alt+click to show only these"><i class="codicon codicon-${esc(x.icon)}"></i><span>${esc(x.label)}</span><span class="n">${x.count}</span></button>`,
+        )
+        .join('');
+  }
+
   function render() {
+    renderSources();
     document.querySelectorAll('[data-group]').forEach((b) => {
       const on = state && b.dataset.group === state.groupBy;
       b.classList.toggle('active', !!on);
@@ -249,18 +273,25 @@
       ? `${shown} of ${state.total} sessions`
       : `${state.total} session${state.total === 1 ? '' : 's'} · ${projects} project${projects === 1 ? '' : 's'}`;
 
-    if (state.hiddenByFilter) {
+    if (state.hiddenBySource) {
+      $list.innerHTML = emptyState(
+        'filter',
+        'Nothing from these sources',
+        'Your sessions are from the sources that are switched off.',
+        '<button class="btn" id="all-sources">Show all sources</button>',
+      );
+    } else if (state.hiddenByFilter) {
       $list.innerHTML = emptyState(
         'filter',
         'Nothing in this workspace',
-        'None of your Claude Code sessions were started in the folders open in this window.',
+        'None of your sessions were started in the folders open in this window.',
         '<button class="btn" id="show-all">Show all projects</button>',
       );
     } else if (state.total === 0) {
       $list.innerHTML = emptyState(
         'comment-discussion',
         'No sessions yet',
-        'Run claude in a terminal and your sessions will show up here automatically.',
+        'Run claude or copilot in a terminal, or chat in VS Code, and your sessions will show up here automatically.',
       );
     } else if (!html && searchPending()) {
       // Transcript results are on their way; avoid flashing "No matches".
@@ -317,6 +348,10 @@
     const card = e.target.closest('.card');
     if (e.target.closest('#show-all')) {
       vscode.postMessage({ type: 'setWorkspaceOnly', value: false });
+      return;
+    }
+    if (e.target.closest('#all-sources')) {
+      setSources(null);
       return;
     }
     const header = e.target.closest('.group-header');
@@ -420,6 +455,31 @@
   document.querySelectorAll('[data-group]').forEach((b) =>
     b.addEventListener('click', () => vscode.postMessage({ type: 'setGroupBy', value: b.dataset.group })),
   );
+  /** Asks for these source ids, or every source for null. */
+  const setSources = (ids) => vscode.postMessage({ type: 'setSources', value: ids ?? Object.keys(state?.sourceInfo || {}) });
+
+  $sources.addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-source]');
+    if (!chip || !state) return;
+    const id = chip.dataset.source;
+    if (id === '*') return setSources(null);
+    const on = new Set(state.sources.filter((x) => x.on).map((x) => x.id));
+    if (e.altKey) {
+      // Alt+click: just this source.
+      return setSources([id]);
+    }
+    if (on.has(id)) {
+      // Keep at least one source on; turning the last one off would only empty the list.
+      if (on.size === 1) return;
+      on.delete(id);
+    } else {
+      on.add(id);
+    }
+    // Sources without chips (no sessions yet) stay on, so their first session shows up.
+    const chipless = Object.keys(state.sourceInfo).filter((s) => !state.sources.some((x) => x.id === s));
+    setSources([...on, ...chipless]);
+  });
+
   document.getElementById('ws').addEventListener('click', () =>
     vscode.postMessage({ type: 'setWorkspaceOnly', value: !state?.workspaceOnly }),
   );

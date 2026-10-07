@@ -3,7 +3,10 @@
 //   "two words"   the exact phrase
 //   -word -"a b"  sessions NOT containing it
 //   a OR b        either one
+//   source:copilot  only sessions from that tool (claude, copilot, chat); -source:chat leaves it out
 // Terms separated by spaces must all match. No VS Code imports, so it can be unit-tested with plain Node.
+
+import { SessionSource, sourceAlias } from './sources';
 
 export interface Term {
   text: string;
@@ -16,6 +19,8 @@ export interface Query {
   clauses: Term[][];
   /** Texts of the positive terms, for highlighting. */
   highlight: string[];
+  /** From `source:` terms: sessions must come from one of `include` (when any) and from none of `exclude`. */
+  sources: { include: SessionSource[]; exclude: SessionSource[] };
 }
 
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -28,8 +33,11 @@ export function termPattern(text: string): string {
 // A quoted phrase (optionally negated, closing quote optional) or a bare word.
 const TOKEN = /(-?)"([^"]*)"?|(\S+)/g;
 
+const SOURCE_TERM = /^(-?)source:(.+)$/i;
+
 export function parseQuery(input: string): Query {
   const clauses: Term[][] = [];
+  const sources: Query['sources'] = { include: [], exclude: [] };
   let orPending = false;
   for (const m of input.matchAll(TOKEN)) {
     let text: string;
@@ -39,6 +47,13 @@ export function parseQuery(input: string): Query {
       negate = m[1] === '-';
     } else {
       text = m[3];
+      // A known source filters by source; anything else after "source:" is searched for as text.
+      const sm = SOURCE_TERM.exec(text);
+      const source = sm ? sourceAlias(sm[2]) : undefined;
+      if (sm && source) {
+        (sm[1] ? sources.exclude : sources.include).push(source);
+        continue;
+      }
       const prev = clauses[clauses.length - 1];
       if (text === 'OR' && prev && !prev[0].negate && !orPending) {
         orPending = true;
@@ -62,10 +77,16 @@ export function parseQuery(input: string): Query {
     orPending = false;
   }
   const highlight = [...new Set(clauses.flat().filter((t) => !t.negate).map((t) => t.text.toLowerCase()))];
-  return { clauses, highlight };
+  return { clauses, highlight, sources };
 }
 
-export const isEmptyQuery = (q: Query) => q.clauses.length === 0;
+export const isEmptyQuery = (q: Query) =>
+  q.clauses.length === 0 && q.sources.include.length === 0 && q.sources.exclude.length === 0;
+
+/** True when the query's `source:` terms allow this source. */
+export function sourceAllowed(q: Query, source: SessionSource): boolean {
+  return (!q.sources.include.length || q.sources.include.includes(source)) && !q.sources.exclude.includes(source);
+}
 
 /** True when the query holds for the combined texts (a term counts as found if it is in any of them). */
 export function evaluate(q: Query, texts: string[]): boolean {
