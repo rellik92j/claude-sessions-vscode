@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const os = require('node:os');
 const path = require('node:path');
 const fs = require('node:fs');
-const { collectHandoffFacts, collectTranscriptFacts, buildHandoff, MAX_HANDOFF } = require('../out/handoff');
+const { collectHandoffFacts, collectTranscriptFacts, buildHandoff, shellWrites, MAX_HANDOFF } = require('../out/handoff');
 const { parseCopilotTranscript } = require('../out/copilotCliParser');
 const { parseChatTranscript } = require('../out/vscodeChatParser');
 
@@ -187,4 +187,111 @@ test('collectTranscriptFacts: Copilot CLI and VS Code Chat transcripts', () => {
   const text = buildHandoff({ ...session, source: 'vscode-chat' }, chat, 'C:\\repo', undefined, 'claude');
   assert.match(text, /^I'm continuing work from an earlier VS Code Chat session/);
   assert.match(text, /## Copilot's last reply\nSummary of the readme\./);
+});
+
+test('handoff notes: files and pages written when the user asked for a handoff, wherever they went', () => {
+  const scratch = path.join(os.tmpdir(), 'claude', 'p', 'sess-1', 'scratchpad', 'handoff.md');
+  const result = (id, text) => user([{ type: 'tool_result', tool_use_id: id, content: [{ type: 'text', text }] }]);
+  const f = collectHandoffFacts(
+    jsonl(
+      user('does the handoff list the files?'),
+      asst([tool('Edit', { file_path: 'C:\\repo\\README.md' })]),
+      user('create and save a handoff.md for this session'),
+      asst([
+        tool('Write', { file_path: 'C:\\repo\\HANDOFF.md', content: '' }),
+        tool('Edit', { file_path: 'C:\\repo\\src\\a.ts' }),
+        tool('Write', { file_path: scratch, content: '' }),
+      ]),
+      { ...asst([tool('Bash', { command: 'cp HANDOFF.md /c/Users/me/Desktop/ && echo done > /dev/null' })]), cwd: 'C:\\repo' },
+      asst([{ type: 'tool_use', id: 'pub', name: 'Artifact', input: { file_path: scratch } }]),
+      result('pub', 'Published to https://claude.ai/code/artifact/abc123. Watching it.'),
+      asst([{ type: 'text', text: 'Saved.' }]),
+      user('now fix the login bug'),
+      asst([tool('Write', { file_path: 'C:\\repo\\notes.md' }), tool('Write', { file_path: 'C:\\other\\HANDOFF.md' })]),
+    ),
+  );
+  assert.deepEqual(
+    f.handoffNotes,
+    ['C:\\repo\\HANDOFF.md', scratch, path.join('C:\\Users\\me\\Desktop', 'HANDOFF.md'), 'https://claude.ai/code/artifact/abc123', 'C:\\other\\HANDOFF.md'],
+    'code, files from turns that only mention a handoff, and unrelated notes are left out; later copies count',
+  );
+
+  const text = buildHandoff(session, f, 'C:\\repo');
+  assert.ok(text.indexOf('## Read first: handoff notes') < text.indexOf('## My last request'), 'called out first');
+  assert.ok(text.includes('read them before anything else:\n\n    C:\\other\\HANDOFF.md\n\nOther copies, newest first.'), 'the latest stands alone');
+  assert.ok(
+    text.includes(`can't be read:\n- https://claude.ai/code/artifact/abc123\n- ${path.join('C:\\Users\\me\\Desktop', 'HANDOFF.md')}\n- ${scratch}\n- C:\\repo\\HANDOFF.md\n`),
+    'older copies newest first, a scratch copy named in full',
+  );
+  assert.equal(text.split('C:\\other\\HANDOFF.md').length, 2, 'the latest is named once');
+  assert.doesNotMatch(text.split('## Files changed with edit tools')[1].split('The full earlier')[0], /HANDOFF/, 'not listed twice');
+  assert.ok(text.includes('First read the handoff notes named at the top. Then, before changing anything, briefly summarise'));
+  assert.match(text, /wait for my instruction\.$/);
+});
+
+test('handoff notes: a handoff skill, Claude-invoked or typed, marks its turn', () => {
+  const memory = path.join(os.homedir(), '.claude', 'projects', 'p', 'memory', 'project_lead_handoff.md');
+  const invoked = collectHandoffFacts(
+    jsonl(user('wrap up for today'), asst([tool('Skill', { skill: 'session-handoff' })]), asst([tool('Write', { file_path: memory })])),
+  );
+  assert.deepEqual(invoked.handoffNotes, [memory]);
+  const typed = collectHandoffFacts(
+    jsonl(
+      user('<command-message>handoff</command-message>\n<command-name>/handoff</command-name>\n<command-args></command-args>'),
+      user([{ type: 'text', text: 'Base directory for this skill: C:\\skills\\handoff' }], { isMeta: true }),
+      asst([tool('Write', { file_path: 'C:\\repo\\docs\\handoff-2026-10-06.md' })]),
+    ),
+  );
+  assert.deepEqual(typed.handoffNotes, ['C:\\repo\\docs\\handoff-2026-10-06.md']);
+  const one = buildHandoff(session, typed, 'C:\\repo');
+  assert.ok(one.includes('before anything else:\n\n    C:\\repo\\docs\\handoff-2026-10-06.md\n\n## My last request'));
+  assert.doesNotMatch(one, /Other copies/);
+  const none = buildHandoff(session, { ...typed, handoffNotes: [] }, 'C:\\repo');
+  assert.doesNotMatch(none, /handoff notes|First read/);
+});
+
+test('shellWrites: redirections, tee, PowerShell cmdlets and copies', () => {
+  assert.deepEqual(shellWrites("cat > handoff.md <<'EOF'\nx\nEOF", 'C:\\repo'), [path.join('C:\\repo', 'handoff.md')]);
+  assert.deepEqual(shellWrites('echo x 2>&1 >> "C:\\a\\n.md"'), [path.normalize('C:\\a\\n.md')]);
+  assert.deepEqual(shellWrites('echo x >> C:\\notes\\n.md 2>/dev/null'), [path.normalize('C:\\notes\\n.md')]);
+  assert.deepEqual(shellWrites('echo x | tee -a ~/h.md'), [path.join(os.homedir(), 'h.md')]);
+  assert.deepEqual(shellWrites('Set-Content -Value $x -Path C:\\h.md'), [path.normalize('C:\\h.md')]);
+  assert.deepEqual(shellWrites('$t | Out-File C:\\h.txt -Encoding utf8'), [path.normalize('C:\\h.txt')]);
+  assert.deepEqual(shellWrites('Copy-Item -Path C:\\r\\h.md -Destination D:\\backup'), [path.join('D:\\backup', 'h.md')]);
+  assert.deepEqual(shellWrites('echo $x > $out'), []);
+});
+
+test('shellWrites: what a heredoc or here-string writes is text, not commands', () => {
+  // The body of a script being written once showed up as handoff notes named "\", "void)" and "add(m[2]))".
+  const heredoc = "cat >> test/a.test.js <<'EOF'\nconst f = (x) => add(x);\nif (a > b) {}\nassert('\\\\' > '\\\\');\nEOF\necho ok > done.md";
+  assert.deepEqual(shellWrites(heredoc, 'C:\\repo'), [path.join('C:\\repo', 'test', 'a.test.js'), path.join('C:\\repo', 'done.md')]);
+  assert.deepEqual(shellWrites("python - <<'EOF'\nopen('x.md','w')  # a > b.md\nEOF"), []);
+  assert.deepEqual(shellWrites("@'\n$a -> b > c.md\n'@ | Set-Content C:\\h.md"), [path.normalize('C:\\h.md')]);
+  assert.deepEqual(shellWrites('node -e "[1].map((x) => x)"'), []);
+});
+
+test('handoff notes: only notes files count, not code or extensionless names', () => {
+  const f = collectHandoffFacts(
+    jsonl(
+      user('write a handoff for this session'),
+      { ...asst([tool('Bash', { command: 'echo x > handoff && echo y > / && echo z > notes.md' })]), cwd: 'C:\\repo' },
+    ),
+  );
+  assert.deepEqual(f.handoffNotes, [path.join('C:\\repo', 'notes.md')]);
+});
+
+test('handoff notes: Copilot CLI and VS Code Chat transcripts', () => {
+  const entries = [
+    { role: 'user', parts: [{ kind: 'text', text: 'Write a handoff doc and save it to docs/' }] },
+    {
+      role: 'assistant',
+      parts: [
+        { kind: 'tool_use', name: 'create', input: JSON.stringify({ path: 'docs/handoff.md' }) },
+        { kind: 'tool_use', name: 'bash', input: JSON.stringify({ command: 'cp docs/handoff.md ~/Desktop/' }) },
+        { kind: 'text', text: 'Done.' },
+      ],
+    },
+  ];
+  const f = collectTranscriptFacts(entries, 'C:\\repo');
+  assert.deepEqual(f.handoffNotes, [path.join('C:\\repo', 'docs', 'handoff.md'), path.join(os.homedir(), 'Desktop', 'handoff.md')]);
 });

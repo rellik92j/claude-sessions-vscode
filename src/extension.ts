@@ -1,5 +1,5 @@
 import { execFile } from 'child_process';
-import { existsSync } from 'fs';
+import { existsSync, statSync } from 'fs';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
@@ -297,6 +297,8 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
     const facts = isClaude(session) ? collectHandoffFacts(log) : collectTranscriptFacts(parseTranscriptFor(session, log), cwd || undefined);
+    // A handoff saved to a scratchpad may since have been cleaned up.
+    facts.handoffNotes = facts.handoffNotes?.filter((n) => /^https?:/.test(n) || statSync(n, { throwIfNoEntry: false })?.isFile());
     const handoff = buildHandoff(session, facts, cwd || undefined, hasCwd ? await gitStatus(cwd) : undefined, target);
     // Continuing a continued session keeps one "Continued: " rather than stacking them.
     const title = session.title.replace(/^(Continued: )+/, '');
