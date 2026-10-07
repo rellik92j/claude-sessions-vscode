@@ -50,6 +50,26 @@ test('fast mode, US inference and web searches', () => {
   close(search.cost, 0.03);
 });
 
+test('Haiku 5.5 bills prompts over 100K tokens at the higher tier', () => {
+  const haiku = (id, u) => {
+    const r = asst(id, u);
+    r.message.model = 'claude-haiku-5-5';
+    return r;
+  };
+  // Up to 100K: $0.10 in, $0.50 out, cache reads $0.01.
+  const short = parseSession(jsonl(haiku('m1', usage(40_000, 0, 0, 60_000, 1_000_000))), 'f', 'p', 'id').usage;
+  close(short.costs.input, 0.004);
+  close(short.costs.cacheRead, 0.0006);
+  close(short.costs.output, 0.5);
+  // Over 100K, cache reads and writes included: $0.50 in, $2.50 out, cache reads $0.05, 5m writes $0.625.
+  const long = parseSession(jsonl(haiku('m1', usage(40_000, 1, 0, 60_000, 1_000_000))), 'f', 'p', 'id').usage;
+  close(long.costs.input, 0.02);
+  close(long.costs.cacheRead, 0.003);
+  close(long.costs.cacheWrite5m, 0.000000625);
+  close(long.costs.output, 2.5);
+  assert.equal(long.context.limit, 1_000_000);
+});
+
 test('subagents add to cost but not to context or cache', () => {
   const main = asst('m1', usage(10, 0, 1000, 5000, 100), { timestamp: '2026-10-01T10:00:00.000Z' });
   const side = asst('s1', usage(10, 50_000, 0, 0, 100), { isSidechain: true, timestamp: '2026-10-01T11:00:00.000Z' });
