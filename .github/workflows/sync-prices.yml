@@ -66,7 +66,8 @@ jobs:
             echo "\`npm test\`: **${{ steps.test.outcome }}**"
             echo
             echo '```'
-            grep -E '^(not ok|# (tests|pass|fail|skipped) )' "$RUNNER_TEMP/test.txt" || tail -n 20 "$RUNNER_TEMP/test.txt"
+            # Failing tests and totals from Node's spec reporter (dropping the repeat in its summary).
+            grep -E '^(✖ |ℹ (tests|pass|fail|skipped) )' "$RUNNER_TEMP/test.txt" | awk '!/^✖ failing tests:/ && !seen[$0]++' || tail -n 20 "$RUNNER_TEMP/test.txt"
             echo '```'
           } > "$RUNNER_TEMP/body.md"
 
