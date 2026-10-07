@@ -15,7 +15,13 @@ concurrency: sync-prices
 
 jobs:
   sync:
-    runs-on: ubuntu-latest
+    # Windows, like the machine the extension is developed on: some handoff tests use Windows paths.
+    runs-on: windows-latest
+    # Git Bash rather than PowerShell; naming bash explicitly also adds pipefail, so a failing npm test fails its
+    # step despite the tee.
+    defaults:
+      run:
+        shell: bash
     env:
       BRANCH: sync-model-prices
       GH_TOKEN: ${{ github.token }}
@@ -23,7 +29,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # npm runs scripts with cmd on Windows, so `node --test test/*.test.js` needs Node 22+ to expand the glob.
+          node-version: 24
           cache: npm
 
       - name: Sync prices
@@ -42,8 +49,6 @@ jobs:
         id: test
         if: steps.diff.outputs.changed == 'true'
         continue-on-error: true
-        # An explicit bash shell adds pipefail, so a failing npm test fails the step despite the tee.
-        shell: bash
         run: |
           npm ci
           npm test 2>&1 | tee "$RUNNER_TEMP/test.txt"
@@ -61,7 +66,8 @@ jobs:
             echo "\`npm test\`: **${{ steps.test.outcome }}**"
             echo
             echo '```'
-            grep -E '^(not ok|# (tests|pass|fail|skipped) )' "$RUNNER_TEMP/test.txt"
+            # Failing tests and totals from Node's spec reporter (dropping the repeat in its summary).
+            grep -E '^(✖ |ℹ (tests|pass|fail|skipped) )' "$RUNNER_TEMP/test.txt" | awk '!/^✖ failing tests:/ && !seen[$0]++' || tail -n 20 "$RUNNER_TEMP/test.txt"
             echo '```'
           } > "$RUNNER_TEMP/body.md"
 
