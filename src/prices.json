@@ -171,7 +171,7 @@
     }
   },
   "haiku-4-5": {
-    "input": 1,
+    "input": 1.5,
     "output": 5,
     "cacheRead": 0.1,
     "cacheWrite5m": 1.25,
