@@ -42,9 +42,11 @@ jobs:
         id: test
         if: steps.diff.outputs.changed == 'true'
         continue-on-error: true
+        # An explicit bash shell adds pipefail, so a failing npm test fails the step despite the tee.
+        shell: bash
         run: |
           npm ci
-          npm test 2>&1 | tail -n 12 > "$RUNNER_TEMP/test.txt"
+          npm test 2>&1 | tee "$RUNNER_TEMP/test-full.txt"
 
       - name: Open or update the pull request
         if: steps.diff.outputs.changed == 'true'
