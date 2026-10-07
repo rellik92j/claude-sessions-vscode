@@ -19,7 +19,7 @@ export interface HandoffFacts {
   read: string[];
   /** Unfinished items from the latest TodoWrite, if the session used one. */
   todos: { content: string; status: string }[];
-  /** Skills the session invoked (plugin skills as "plugin:skill"), in first-use order. */
+  /** Skills Claude invoked or the user typed as /name (plugin skills as "plugin:skill"), in first-use order. */
   skills: string[];
   /** MCP servers (connectors, plugin servers) whose tools the session called, as their tool prefix "mcp__<server>". */
   mcpServers: string[];
@@ -32,6 +32,17 @@ const MIN_FINAL_REPLY = 200;
 
 /** A last prompt shorter than this gets the prompt before it too. */
 const SHORT_PROMPT = 300;
+
+/** How Claude Code opens the message that loads a skill, whether Claude invoked it or the user typed /name. */
+const SKILL_LOAD = /^Base directory for this skill:/;
+
+function contentText(content: unknown): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+  const first = Array.isArray(content) ? content.find((p) => p?.type === 'text') : undefined;
+  return typeof first?.text === 'string' ? first.text : '';
+}
 
 /** Collects what the handoff needs from a session log (main thread only, like the transcript). */
 export function collectHandoffFacts(text: string): HandoffFacts {
@@ -49,21 +60,37 @@ export function collectHandoffFacts(text: string): HandoffFacts {
   // interrupted turn may end on a one-line "Now tests.", so the whole turn is kept too as a fallback.
   let turn: string[] = [];
   let final: string[] = [];
+  const newPrompt = (prompt: string) => {
+    facts.previousPrompt = facts.lastPrompt;
+    facts.lastPrompt = prompt;
+    turn = [];
+    final = [];
+  };
+  // A slash command the user typed ("/ship-change looks good"). It is a skill, and so a request, only if the next
+  // record loads a skill; built-ins like /effort or /clear load nothing.
+  let command: string | undefined;
   for (const r of records(text)) {
-    if (!r || typeof r !== 'object' || r.isSidechain || r.isMeta || r.isCompactSummary) {
+    if (!r || typeof r !== 'object' || r.isSidechain || r.isCompactSummary) {
       continue;
     }
     const content = r.message?.content;
+    if (r.isMeta) {
+      if (command && r.type === 'user' && !r.sourceToolUseID && SKILL_LOAD.test(contentText(content))) {
+        skills.add(command.split(/\s/)[0].replace(/^\//, ''));
+        newPrompt(command);
+      }
+      command = undefined;
+      continue;
+    }
     if (r.type === 'user') {
       const c = classifyUserContent(content);
+      command = c.kind === 'command' ? c.text : undefined;
       if (c.kind === 'prompt') {
-        facts.previousPrompt = facts.lastPrompt;
-        facts.lastPrompt = c.text;
-        turn = [];
-        final = [];
+        newPrompt(c.text);
       }
       continue;
     }
+    command = undefined;
     if (r.type !== 'assistant' || !Array.isArray(content)) {
       continue;
     }

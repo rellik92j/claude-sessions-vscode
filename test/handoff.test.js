@@ -91,6 +91,31 @@ test('skills and MCP servers the session used are collected and listed', () => {
   assert.doesNotMatch(buildHandoff(session, { ...f, skills: [], mcpServers: [] }, 'C:\\repo'), /## Skills and connectors/);
 });
 
+test('skills typed as /name are listed and count as the request; built-in commands are not', () => {
+  const load = (name, extra = {}) => user([{ type: 'text', text: `Base directory for this skill: C:\\skills\\${name}\n\n# Skill` }], { isMeta: true, ...extra });
+  const command = (name, args = '') =>
+    user(`<command-message>${name}</command-message>\n<command-name>/${name}</command-name>\n<command-args>${args}</command-args>`);
+  const f = collectHandoffFacts(
+    jsonl(
+      user('Fix the bug'),
+      asst([tool('Skill', { skill: 'start-change' })]),
+      load('start-change', { sourceToolUseID: 't' }),
+      asst([{ type: 'text', text: 'Fixed.' }]),
+      command('effort', 'high'),
+      user('<local-command-stdout>Set effort to high</local-command-stdout>'),
+      command('productivity:update'),
+      load('update'),
+      command('ship-change', 'looks good'),
+      load('ship-change'),
+      asst([{ type: 'text', text: 'Shipped.' }]),
+    ),
+  );
+  assert.deepEqual(f.skills, ['start-change', 'productivity:update', 'ship-change']);
+  assert.equal(f.lastPrompt, '/ship-change looks good');
+  assert.equal(f.previousPrompt, '/productivity:update');
+  assert.equal(f.lastReply, 'Shipped.');
+});
+
 test('collectHandoffFacts: the reply is the final message after the last tool call', () => {
   const summary = ('Shipped. ' + 'Details of what changed. '.repeat(10)).trim();
   const f = collectHandoffFacts(
