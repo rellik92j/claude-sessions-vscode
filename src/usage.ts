@@ -10,16 +10,26 @@ interface Price {
   context: number;
   /** Fast mode bills at twice the standard rates on the models that offer it. */
   fast?: boolean;
+  /** Prompts (input plus cache reads and writes) over `above` tokens bill every category at `mult` times the rates. */
+  long?: { above: number; mult: number };
 }
 
 const M = 1_000_000;
 const K200 = 200_000;
-const price = (input: number, output: number, readMultiplier: number, context: number, fast = false): Price => ({
+const price = (
+  input: number,
+  output: number,
+  readMultiplier: number,
+  context: number,
+  fast = false,
+  long?: Price['long'],
+): Price => ({
   input,
   output,
   cacheRead: input * readMultiplier,
   context,
   fast,
+  long,
 });
 
 // From https://platform.claude.com/docs/en/about-claude/pricing (October 2026), keyed by model id without the
@@ -37,12 +47,13 @@ const PRICES: Record<string, Price> = {
   'opus-4-5': price(5, 25, 0.1, K200),
   'opus-4-1': price(15, 75, 0.1, K200),
   'opus-4': price(15, 75, 0.1, K200),
-  'sonnet-5-5': price(2, 10, 0.1, M),
+  'sonnet-5-5': price(2, 10, 0.05, M),
   'sonnet-5': price(2, 10, 0.1, M),
   'sonnet-4-6': price(3, 15, 0.1, M),
   'sonnet-4-5': price(3, 15, 0.1, K200),
   'sonnet-4': price(3, 15, 0.1, K200),
   '3-7-sonnet': price(3, 15, 0.1, K200),
+  'haiku-5-5': price(0.1, 0.5, 0.1, M, false, { above: 100_000, mult: 5 }),
   'haiku-4-5': price(1, 5, 0.1, K200),
   '3-5-haiku': price(0.8, 4, 0.1, K200),
 };
@@ -194,7 +205,11 @@ export class UsageCollector {
       let cost = searches * WEB_SEARCH_PRICE;
       costs.webSearch += searches * WEB_SEARCH_PRICE;
       if (p) {
-        const mult = (req.speed === 'fast' && p.fast ? 2 : 1) * (req.geo === 'us' ? 1.1 : 1);
+        const prompt = t.input + t.cacheWrite5m + t.cacheWrite1h + t.cacheRead;
+        const mult =
+          (req.speed === 'fast' && p.fast ? 2 : 1) *
+          (req.geo === 'us' ? 1.1 : 1) *
+          (p.long && prompt > p.long.above ? p.long.mult : 1);
         const c: TokenCounts = {
           input: (t.input * p.input * mult) / M,
           cacheWrite5m: (t.cacheWrite5m * p.input * 1.25 * mult) / M,
