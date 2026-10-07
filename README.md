@@ -1,8 +1,8 @@
 # Claude Sessions
 
-**Find, read and pick up any Claude Code session without leaving VS Code.**
+**Find, read and pick up any Claude Code session without leaving VS Code. Your GitHub Copilot CLI and VS Code Chat sessions show up too.**
 
-[Claude Code](https://claude.com/claude-code) saves every conversation you have with it, but finding an old one means scrolling through `claude --resume` and guessing from the first line. Claude Sessions adds a sidebar that shows all of your sessions across every project. You can search everything you and Claude said, read any conversation as a chat transcript, see what each session used and cost (or chart what all of them cost, by day, model and project), and resume it in one click.
+[Claude Code](https://claude.com/claude-code) saves every conversation you have with it, but finding an old one means scrolling through `claude --resume` and guessing from the first line. Claude Sessions adds a sidebar that shows all of your sessions across every project. You can search everything you and Claude said, read any conversation as a chat transcript, see what each session used and cost (or chart what all of them cost, by day, model and project), and resume it in one click, or carry it over into a fresh session, even in a different tool. Your [GitHub Copilot CLI and VS Code Chat](#github-copilot-cli-and-vs-code-chat-sessions-too) sessions are listed alongside, so one search covers all of them.
 
 ![The Claude Sessions sidebar next to a transcript](docs/images/overview.png)
 
@@ -16,7 +16,10 @@ Each card also shows what the session cost, plus a couple of [usage badges](#see
 
 - **Projects** groups sessions by folder, and each project gets its own colored avatar. **Recent** groups them by date (Today, Yesterday, Previous 7 Days, and so on).
 - **Workspace** filter: show only the sessions started in the folders you have open in this window.
+- **Source chips** under the search box filter by tool (Claude Code, Copilot CLI, VS Code Chat). See [below](#github-copilot-cli-and-vs-code-chat-sessions-too).
 - Hover a card for quick actions: resume, continue in a new session, open in Claude Code chat, read the transcript, or copy the session ID. Right-click for more.
+
+The sidebar refreshes on its own as sessions change, and everything follows your VS Code color theme.
 
 ### Search everything you and Claude said
 
@@ -82,6 +85,17 @@ The overview starts with the projects in your current workspace. Use the **Proje
 
 Cost is counted on the day each request was made, so a session that ran over several days is split across them.
 
+### Pick up where you left off
+
+![Resuming a session in a Claude Code terminal beside the editor](docs/images/resume.png)
+
+You'll find these on each card and at the top of each transcript. This is how they work for Claude Code sessions; [Copilot CLI and VS Code Chat sessions](#github-copilot-cli-and-vs-code-chat-sessions-too) work much the same way.
+
+- **Resume** (▶) opens `claude --resume <id>` in a terminal tab beside your editor, in the session's project folder. If the session is already open, its terminal is focused instead.
+- **Continue in New Session** (⮕) starts a fresh session with a handoff of where the old one stopped. The handoff includes your last request, Claude's last reply, the files it edited and read, any open to-dos, the current `git status`, and the path to the old transcript. Claude is asked to summarize and wait for your instruction before changing anything. Use this when a session has grown too long to keep working in.
+- **Continue in New Session with Tool or Model…** does the same, but first asks where the new session runs: Claude Code, GitHub Copilot CLI or VS Code Chat. For a CLI it then asks which model and effort level to use, instead of that CLI's settings. This also lets you move work between tools, for example from a Copilot chat to Claude Code. Find it in a card's right-click menu, or click the ⌄ next to **Continue in new session** in a transcript.
+- **Open in Claude Code Chat** reopens the session in the chat panel of the official Claude Code extension, if you have it installed.
+
 ### GitHub Copilot CLI and VS Code Chat sessions too
 
 The sidebar also lists your [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli) sessions and your VS Code Chat (GitHub Copilot Chat) conversations, next to your Claude Code sessions. Each card has a badge naming its tool. You can search all of them and read any of them as a transcript.
@@ -93,20 +107,14 @@ The sidebar also lists your [GitHub Copilot CLI](https://docs.github.com/en/copi
 
 Sessions are read from `~/.copilot/session-state` (or `$COPILOT_HOME`), and from the `workspaceStorage` folders of VS Code and VS Code Insiders. Chats from remote, WSL or SSH windows, and from other editors built on VS Code, are not included.
 
-### Pick up where you left off
-
-![Resuming a session in a Claude Code terminal beside the editor](docs/images/resume.png)
-
-- **Resume** (▶) opens `claude --resume <id>` in a terminal tab beside your editor, in the session's project folder. If the session is already open, its terminal is focused instead.
-- **Continue in New Session** (⮕) starts a fresh session with a handoff of where the old one stopped. The handoff includes your last request, Claude's last reply, the files it edited and read, any open to-dos, the current `git status`, and the path to the old transcript. Claude is asked to summarize and wait for your instruction before changing anything. Use this when a session has grown too long to keep working in.
-- **Continue in New Session with Tool or Model…** does the same, but first asks where the new session runs: Claude Code, GitHub Copilot CLI or VS Code Chat. For a CLI it then asks which model and effort level to use, instead of that CLI's settings. This also lets you move work between tools, for example from a Copilot chat to Claude Code. Find it in a card's right-click menu, or click the ⌄ next to **Continue in new session** in a transcript.
-- **Open in Claude Code Chat** reopens the session in the chat panel of the official Claude Code extension, if you have it installed.
-
-The sidebar refreshes on its own as sessions change, and everything follows your VS Code color theme.
-
 ## Install
 
 You need **VS Code 1.90 or newer**. To use Resume and Continue in New Session, you also need the **[Claude Code CLI](https://docs.claude.com/en/docs/claude-code/setup)** installed, so that `claude` runs in a terminal.
+
+The other tools are optional. Their sessions are listed whenever their logs are on your machine, but to resume or continue them you need:
+
+- **[GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli)**, so that `copilot` runs in a terminal, for Copilot CLI sessions.
+- The **GitHub Copilot Chat** extension, for opening VS Code chats and continuing work in a new chat.
 
 Claude Sessions isn't on the VS Code Marketplace yet. To install it:
 
@@ -134,9 +142,12 @@ In the sidebar:
 | Key | Action |
 | --- | --- |
 | `/` | Focus search |
+| Enter (in the search box) | Open the first matching session |
+| Esc (in the search box) | Clear the search |
 | ↑ / ↓ | Move between sessions |
+| ← / → | Collapse or expand a group |
 | Enter | Open transcript |
-| Ctrl+Enter | Resume |
+| Ctrl+Enter (Cmd+Enter on macOS) | Resume |
 
 In a transcript: F3 / Shift+F3 step through search matches, and Esc clears them.
 
@@ -146,16 +157,16 @@ The **Claude Sessions: Search Sessions…** command in the Command Palette searc
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `claudeSessions.projectsDir` | `""` | Folder with session logs. Empty means `$CLAUDE_CONFIG_DIR/projects` or `~/.claude/projects`. |
 | `claudeSessions.sources` | all three | Tools whose sessions a new window shows: `claude`, `copilot-cli`, `vscode-chat`. |
+| `claudeSessions.projectsDir` | `""` | Folder with Claude Code's session logs. Empty means `$CLAUDE_CONFIG_DIR/projects` or `~/.claude/projects`. |
 | `claudeSessions.copilotDir` | `""` | GitHub Copilot CLI's folder. Empty means `$COPILOT_HOME` or `~/.copilot`. |
 | `claudeSessions.vscodeUserDir` | `""` | VS Code's user data folder, for chats. Empty means the default folders of VS Code and VS Code Insiders. |
-| `claudeSessions.copilotCommand` | `copilot` | Command used to launch GitHub Copilot CLI when resuming. |
 | `claudeSessions.groupBy` | `project` | Group sessions by `project` or `date`. |
 | `claudeSessions.currentWorkspaceOnly` | `false` | Only show sessions from the open workspace folders. |
 | `claudeSessions.hideEmptySessions` | `true` | Hide sessions with no prompts or replies. |
-| `claudeSessions.claudeCommand` | `claude` | Command used to launch Claude Code when resuming. |
-| `claudeSessions.terminalLocation` | `editor` | Open the terminal as an `editor` tab or in the bottom `panel`. |
+| `claudeSessions.claudeCommand` | `claude` | Command used to launch Claude Code when resuming or continuing. |
+| `claudeSessions.copilotCommand` | `copilot` | Command used to launch GitHub Copilot CLI when resuming or continuing. |
+| `claudeSessions.terminalLocation` | `editor` | Open CLI terminals as an `editor` tab or in the bottom `panel`. |
 | `claudeSessions.showThinking` | `false` | Show Claude's thinking blocks in transcripts. |
 | `claudeSessions.reuseTranscriptTab` | `true` | Reuse one preview tab for transcripts. When off, every transcript gets its own tab. |
 
@@ -174,7 +185,9 @@ How the code is laid out:
 | Path | What it does |
 | --- | --- |
 | `src/extension.ts` | Activation, commands, file watching, resuming and continuing sessions |
-| `src/sessionStore.ts`, `src/sessionParser.ts` | Find and parse the session logs (cached by file size and time) |
+| `src/sessionStore.ts` | Find and load the session logs of every tool (cached by file size and time) |
+| `src/sessionParser.ts`, `src/copilotCliParser.ts`, `src/vscodeChatParser.ts` | Parse Claude Code, GitHub Copilot CLI and VS Code Chat logs |
+| `src/sources.ts`, `src/transcripts.ts` | What differs between the tools, and picking the right parser for a transcript |
 | `src/usage.ts` | Tokens, API-priced cost (also by day and model), context fill and prompt-cache state |
 | `src/model.ts`, `src/query.ts` | Loaded sessions, grouping and filters, and the search syntax |
 | `src/sidebarView.ts`, `media/sidebar.*` | The sidebar webview |
@@ -182,7 +195,7 @@ How the code is laid out:
 | `src/overview.ts`, `src/overviewPanel.ts`, `media/overview.*` | The overview tab: `overview.ts` builds the numbers, the panel picks the projects |
 | `src/handoff.ts` | The prompt that starts Continue in New Session |
 
-Files without VS Code imports (`sessionParser`, `usage`, `query`, `overview`, `handoff`, `format`) are unit tested directly from `out/`; `test/activation.test.js` loads the bundled extension against a fake VS Code API and drives the webviews' messages.
+Files without VS Code imports (the three parsers, `usage`, `query`, `overview`, `handoff`, `markdown`, `format`) are unit tested directly from `out/`; `test/activation.test.js` loads the bundled extension against a fake VS Code API and drives the webviews' messages.
 
 ## License
 
