@@ -15,7 +15,13 @@ concurrency: sync-prices
 
 jobs:
   sync:
-    runs-on: ubuntu-latest
+    # Windows, like the machine the extension is developed on: some handoff tests use Windows paths.
+    runs-on: windows-latest
+    # Git Bash rather than PowerShell; naming bash explicitly also adds pipefail, so a failing npm test fails its
+    # step despite the tee.
+    defaults:
+      run:
+        shell: bash
     env:
       BRANCH: sync-model-prices
       GH_TOKEN: ${{ github.token }}
@@ -42,8 +48,6 @@ jobs:
         id: test
         if: steps.diff.outputs.changed == 'true'
         continue-on-error: true
-        # An explicit bash shell adds pipefail, so a failing npm test fails the step despite the tee.
-        shell: bash
         run: |
           npm ci
           npm test 2>&1 | tee "$RUNNER_TEMP/test.txt"
