@@ -193,19 +193,21 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
     const handoff = buildHandoff(session, collectHandoffFacts(log), cwd, hasCwd ? await gitStatus(cwd) : undefined);
+    // Continuing a continued session keeps one "Continued: " rather than stacking them.
+    const title = session.title.replace(/^(Continued: )+/, '');
     const [shellPath, ...shellArgs] = claudeCommandParts();
     // The CLI is the terminal's process rather than a command typed into a shell, so the multi-line handoff arrives
     // as one argument whatever the shell's quoting rules (Windows PowerShell 5.1 strips embedded double quotes).
     // The CLI sends a prompt given this way at once; the handoff ends by asking Claude to summarise and wait.
     const terminal = vscode.window.createTerminal({
-      ...claudeTerminalOptions(`Claude Code · Continued: ${session.title.slice(0, 30)}`, hasCwd ? cwd : undefined),
+      ...claudeTerminalOptions(`Claude Code · Continued: ${title.slice(0, 30)}`, hasCwd ? cwd : undefined),
       shellPath,
       shellArgs: [
         ...shellArgs,
         ...(overrides.model ? ['--model', overrides.model] : []),
         ...(overrides.effort ? ['--effort', overrides.effort] : []),
         '--name',
-        `Continued: ${session.title}`,
+        `Continued: ${title}`,
         handoff,
       ],
     });

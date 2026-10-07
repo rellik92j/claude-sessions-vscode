@@ -1,26 +1,43 @@
 // Builds the first prompt for "Continue in New Session": a short handoff describing where an earlier session left off.
 // No VS Code imports, so it can be unit-tested with plain Node.
 
+import * as os from 'os';
 import * as path from 'path';
 import { isInside } from './format';
 import { classifyUserContent, records, SessionInfo } from './sessionParser';
 
 export interface HandoffFacts {
   lastPrompt?: string;
+  /** The prompt before the last one, which gives a short last prompt ("yes, ship it") its subject. */
+  previousPrompt?: string;
   lastReply?: string;
+  /** True when lastReply is the whole last turn (its final message was too short to stand alone), so keep its end. */
+  replyIsWholeTurn?: boolean;
   /** Files changed with Claude's edit tools, oldest first. Edits made through shell commands are not seen. */
   modified: string[];
   /** Files read but not modified, oldest first. */
   read: string[];
   /** Unfinished items from the latest TodoWrite, if the session used one. */
   todos: { content: string; status: string }[];
+  /** Skills the session invoked (plugin skills as "plugin:skill"), in first-use order. */
+  skills: string[];
+  /** MCP servers (connectors, plugin servers) whose tools the session called, as their tool prefix "mcp__<server>". */
+  mcpServers: string[];
 }
 
 const MODIFY_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
+/** A final message shorter than this ("Now tests.") is probably an interrupted turn, so the whole turn is used. */
+const MIN_FINAL_REPLY = 200;
+
+/** A last prompt shorter than this gets the prompt before it too. */
+const SHORT_PROMPT = 300;
+
 /** Collects what the handoff needs from a session log (main thread only, like the transcript). */
 export function collectHandoffFacts(text: string): HandoffFacts {
-  const facts: HandoffFacts = { modified: [], read: [], todos: [] };
+  const facts: HandoffFacts = { modified: [], read: [], todos: [], skills: [], mcpServers: [] };
+  const skills = new Set<string>();
+  const mcpServers = new Set<string>();
   // Insertion order follows first use; re-adding moves a file to the end so the most recent ones survive the cap.
   const modified = new Set<string>();
   const read = new Set<string>();
@@ -28,9 +45,10 @@ export function collectHandoffFacts(text: string): HandoffFacts {
     set.delete(file);
     set.add(file);
   };
-  // Everything Claude wrote since the last prompt: a finished turn ends with its summary, but an interrupted one may
-  // end on a one-line "Now tests.", so the whole turn is kept (and clipped from the front later).
+  // The reply is the turn's final message (the text after its last tool call), which is what the user read. An
+  // interrupted turn may end on a one-line "Now tests.", so the whole turn is kept too as a fallback.
   let turn: string[] = [];
+  let final: string[] = [];
   for (const r of records(text)) {
     if (!r || typeof r !== 'object' || r.isSidechain || r.isMeta || r.isCompactSummary) {
       continue;
@@ -39,8 +57,10 @@ export function collectHandoffFacts(text: string): HandoffFacts {
     if (r.type === 'user') {
       const c = classifyUserContent(content);
       if (c.kind === 'prompt') {
+        facts.previousPrompt = facts.lastPrompt;
         facts.lastPrompt = c.text;
         turn = [];
+        final = [];
       }
       continue;
     }
@@ -50,7 +70,16 @@ export function collectHandoffFacts(text: string): HandoffFacts {
     for (const p of content) {
       if (p?.type === 'text' && typeof p.text === 'string' && p.text.trim()) {
         turn.push(p.text.trim());
+        final.push(p.text.trim());
       } else if (p?.type === 'tool_use') {
+        final = [];
+        if (p.name === 'Skill' && typeof p.input?.skill === 'string' && p.input.skill) {
+          skills.add(p.input.skill.replace(/^\//, ''));
+        }
+        const server = typeof p.name === 'string' && /^mcp__(.+?)__/.exec(p.name)?.[1];
+        if (server) {
+          mcpServers.add(`mcp__${server}`);
+        }
         const file = p.input?.file_path ?? p.input?.notebook_path;
         if (typeof file === 'string' && file) {
           if (MODIFY_TOOLS.has(p.name)) {
@@ -67,14 +96,23 @@ export function collectHandoffFacts(text: string): HandoffFacts {
       }
     }
   }
-  facts.lastReply = turn.length ? turn.join('\n\n') : undefined;
+  const finalText = final.join('\n\n');
+  const turnText = turn.join('\n\n');
+  if (finalText.length >= MIN_FINAL_REPLY || (finalText && finalText === turnText)) {
+    facts.lastReply = finalText;
+  } else if (turnText) {
+    facts.lastReply = turnText;
+    facts.replyIsWholeTurn = true;
+  }
+  facts.skills = [...skills];
+  facts.mcpServers = [...mcpServers];
   facts.modified = [...modified];
   facts.read = [...read].filter((f) => !modified.has(f));
   return facts;
 }
 
 /** Windows allows ~32k characters on a command line and the handoff is passed as an argument; stay well under. */
-export const MAX_HANDOFF = 8000;
+export const MAX_HANDOFF = 16000;
 
 interface Limits {
   text: number;
@@ -83,14 +121,14 @@ interface Limits {
 
 // Tried in order until the handoff fits.
 const LIMITS: Limits[] = [
-  { text: 2000, files: 30 },
-  { text: 1200, files: 15 },
-  { text: 600, files: 8 },
+  { text: 4000, files: 30 },
+  { text: 2500, files: 15 },
+  { text: 1200, files: 8 },
 ];
 
-function clip(text: string, max: number): string {
+function clip(text: string, max: number, more = ' […]'): string {
   const t = text.trim();
-  return t.length > max ? t.slice(0, max).trimEnd() + ' […]' : t;
+  return t.length > max ? t.slice(0, max).trimEnd() + more : t;
 }
 
 /** Keeps the end, where a turn's conclusion is. */
@@ -100,18 +138,33 @@ function clipStart(text: string, max: number): string {
 }
 
 /**
- * Project files relative to the project folder, newest last. Files outside it (scratch files, temp output) are only
- * counted, since they rarely matter to the next session and their long paths crowd out the ones that do.
+ * Scratch files, temp output and Claude Code's saved tool output: the earlier session's own working files, of no use
+ * to the next one.
+ */
+function isScratch(file: string): boolean {
+  return (
+    isInside(file, os.tmpdir()) || /[\\/]Temp[\\/]claude[\\/]|[\\/]tool-results[\\/]/i.test(file) || file.startsWith('/tmp/')
+  );
+}
+
+/**
+ * Project files relative to the project folder, newest last, then files under ~/.claude (memory, plans, skills), which
+ * the next session may need. Scratch files are left out, and anything else outside the project is only counted.
  */
 function fileList(files: string[], cwd: string | undefined, max: number): string {
+  const home = os.homedir();
+  const claudeDir = path.join(home, '.claude');
   const inside = cwd ? files.filter((f) => isInside(f, cwd)) : files;
+  const rest = files.filter((f) => !inside.includes(f) && !isScratch(f));
+  const claude = rest.filter((f) => isInside(f, claudeDir));
   const shown = inside.slice(-max).map((f) => `- ${(cwd && path.relative(cwd, f)) || f}`);
   const earlier = inside.length - shown.length;
-  const outside = files.length - inside.length;
+  const other = rest.length - claude.length;
   return [
     earlier > 0 ? `- … ${earlier} earlier` : '',
     ...shown,
-    outside > 0 ? `- … and ${outside} outside the project` : '',
+    ...claude.slice(-max).map((f) => `- ~${path.sep}${path.relative(home, f)}`),
+    other > 0 ? `- … and ${other} other file${other === 1 ? '' : 's'} outside the project` : '',
   ]
     .filter(Boolean)
     .join('\n');
@@ -140,12 +193,23 @@ function render(session: SessionInfo, f: HandoffFacts, cwd: string | undefined, 
   ];
   if (f.lastPrompt) {
     out.push(`## My last request\n${clip(f.lastPrompt, lim.text)}`);
+    if (f.previousPrompt && f.lastPrompt.trim().length < SHORT_PROMPT) {
+      out.push(`## The request before that\n${clip(f.previousPrompt, lim.text / 2)}`);
+    }
   }
   if (f.lastReply) {
-    out.push(`## Your last reply\n${clipStart(f.lastReply, lim.text)}`);
+    const reply = f.replyIsWholeTurn ? clipStart(f.lastReply, lim.text) : clip(f.lastReply, lim.text, ' […] (rest in the transcript)');
+    out.push(`## Your last reply\n${reply}`);
   }
   if (f.todos.length) {
     out.push(`## Unfinished to-dos\n${f.todos.slice(0, lim.files).map((t) => `- [${t.status}] ${t.content}`).join('\n')}`);
+  }
+  const used = [
+    f.skills?.length ? `- Skills: ${f.skills.slice(0, lim.files).join(', ')}` : '',
+    f.mcpServers?.length ? `- Connectors and MCP servers (tool prefixes): ${f.mcpServers.slice(0, lim.files).join(', ')}` : '',
+  ].filter(Boolean);
+  if (used.length) {
+    out.push(`## Skills and connectors used\n${used.join('\n')}`);
   }
   if (f.modified.length) {
     out.push(`## Files changed with edit tools\n${fileList(f.modified, cwd, lim.files)}`);
