@@ -59,7 +59,7 @@ jobs:
             echo "\`npm test\`: **${{ steps.test.outcome }}**"
             echo
             echo '```'
-            cat "$RUNNER_TEMP/test.txt"
+            grep -E '^(not ok|# (tests|pass|fail|skipped) )' "$RUNNER_TEMP/test-full.txt"
             echo '```'
           } > "$RUNNER_TEMP/body.md"
 
