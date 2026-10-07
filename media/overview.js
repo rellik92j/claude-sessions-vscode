@@ -332,14 +332,36 @@
   const save = () => vscode.setState({ range, scope, projects, sessionSort, colorBy, sources });
   const postFilters = () => vscode.postMessage({ type: 'setFilters', range, scope, projects, ...(sources ? { sources } : {}) });
 
+  /**
+   * Source chips work as a filter: with everything shown, clicking a source shows just that one; clicking another adds
+   * it; clicking a chosen one removes it, and removing the last one (or choosing them all) goes back to everything.
+   * Returns the sources to show, or null for all of them.
+   */
+  function nextSources(chips, id) {
+    const all = chips.every((x) => x.on);
+    const chosen = chips.filter((x) => x.on).map((x) => x.id);
+    if (all) return [id];
+    const next = chosen.includes(id) ? chosen.filter((x) => x !== id) : [...chosen, id];
+    return next.length === 0 || next.length === chips.length ? null : next;
+  }
+
+  /** All, then a chip per source; while all are shown, only All is lit. */
   function renderSources() {
     const list = state?.sources || [];
-    $sources.innerHTML = list
-      .map(
-        (x) =>
-          `<button class="chip${x.on ? ' on' : ''}" data-source="${esc(x.id)}" aria-pressed="${x.on}" title="${esc(x.title)}"><i class="codicon codicon-${esc(x.icon)}"></i><span>${esc(x.label)}</span></button>`,
-      )
-      .join('');
+    if (!list.length) {
+      $sources.innerHTML = '';
+      return;
+    }
+    const all = list.every((x) => x.on);
+    const chip = (id, on, title, inner) =>
+      `<button class="chip${on ? ' on' : ''}" data-source="${esc(id)}" aria-pressed="${on}" title="${esc(title)}">${inner}</button>`;
+    $sources.innerHTML =
+      chip('*', all, 'Show sessions from every source', 'All') +
+      list
+        .map((x) =>
+          chip(x.id, !all && x.on, `${x.title}${all ? ': show only these' : x.on ? ': stop showing these' : ': show these too'}`, `<i class="codicon codicon-${esc(x.icon)}"></i><span>${esc(x.label)}</span>`),
+        )
+        .join('');
   }
 
   function setScope(next, picked = projects) {
@@ -537,16 +559,8 @@
     }
     const sourceBtn = e.target.closest('[data-source]');
     if (sourceBtn && state) {
-      const on = new Set(state.sources.filter((x) => x.on).map((x) => x.id));
       const id = sourceBtn.dataset.source;
-      if (on.has(id)) {
-        if (on.size === 1) return;
-        on.delete(id);
-      } else {
-        on.add(id);
-      }
-      // Sources without a chip (no sessions yet) stay on.
-      sources = ['claude', 'copilot-cli', 'vscode-chat'].filter((s) => on.has(s) || !state.sources.some((x) => x.id === s));
+      sources = (id === '*' ? null : nextSources(state.sources, id)) ?? ['claude', 'copilot-cli', 'vscode-chat'];
       save();
       postFilters();
       return;

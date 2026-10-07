@@ -231,7 +231,20 @@
       </div>`;
   }
 
-  /** The source chips: All, then one per source with its session count. */
+  /**
+   * Source chips work as a filter: with everything shown, clicking a source shows just that one; clicking another adds
+   * it; clicking a chosen one removes it, and removing the last one (or choosing them all) goes back to everything.
+   * Returns the sources to show, or null for all of them.
+   */
+  function nextSources(chips, id) {
+    const all = chips.every((x) => x.on);
+    const chosen = chips.filter((x) => x.on).map((x) => x.id);
+    if (all) return [id];
+    const next = chosen.includes(id) ? chosen.filter((x) => x !== id) : [...chosen, id];
+    return next.length === 0 || next.length === chips.length ? null : next;
+  }
+
+  /** The source chips: All, then one per source with its session count. While all are shown, only All is lit. */
   function renderSources() {
     const list = state?.sources || [];
     $sources.hidden = !list.length;
@@ -242,7 +255,7 @@
       list
         .map(
           (x) =>
-            `<button class="chip" data-source="${esc(x.id)}" aria-pressed="${x.on}" title="${esc(x.title)}: click to show or hide, Alt+click to show only these"><i class="codicon codicon-${esc(x.icon)}"></i><span>${esc(x.label)}</span><span class="n">${x.count}</span></button>`,
+            `<button class="chip" data-source="${esc(x.id)}" aria-pressed="${!all && x.on}" title="${esc(x.title)}${all ? ': show only these' : x.on ? ': stop showing these' : ': show these too'}"><i class="codicon codicon-${esc(x.icon)}"></i><span>${esc(x.label)}</span><span class="n">${x.count}</span></button>`,
         )
         .join('');
   }
@@ -462,22 +475,7 @@
     const chip = e.target.closest('[data-source]');
     if (!chip || !state) return;
     const id = chip.dataset.source;
-    if (id === '*') return setSources(null);
-    const on = new Set(state.sources.filter((x) => x.on).map((x) => x.id));
-    if (e.altKey) {
-      // Alt+click: just this source.
-      return setSources([id]);
-    }
-    if (on.has(id)) {
-      // Keep at least one source on; turning the last one off would only empty the list.
-      if (on.size === 1) return;
-      on.delete(id);
-    } else {
-      on.add(id);
-    }
-    // Sources without chips (no sessions yet) stay on, so their first session shows up.
-    const chipless = Object.keys(state.sourceInfo).filter((s) => !state.sources.some((x) => x.id === s));
-    setSources([...on, ...chipless]);
+    setSources(id === '*' ? null : nextSources(state.sources, id));
   });
 
   document.getElementById('ws').addEventListener('click', () =>
