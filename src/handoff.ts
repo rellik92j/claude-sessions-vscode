@@ -4,7 +4,8 @@
 import * as os from 'os';
 import * as path from 'path';
 import { isInside } from './format';
-import { classifyUserContent, records, SessionInfo } from './sessionParser';
+import { classifyUserContent, records, SessionInfo, TranscriptEntry } from './sessionParser';
+import { SessionSource, SOURCES, sourceOf } from './sources';
 
 export interface HandoffFacts {
   lastPrompt?: string;
@@ -138,6 +139,92 @@ export function collectHandoffFacts(text: string): HandoffFacts {
   return facts;
 }
 
+/** Tool names (Claude Code's, Copilot CLI's, VS Code Chat's) that change or read a file. */
+const MODIFY_TOOL = /edit|write|create|replace|patch|insert/i;
+const READ_TOOL = /read|view/i;
+/** Keys a tool's input names its file by. */
+const FILE_KEYS = ['file_path', 'filePath', 'path', 'notebook_path', 'filename', 'file'];
+
+/** The file a tool call worked on: from its input, or failing that its description ("Read c:/repo/a.ts"). */
+function toolFile(input: string, hint: string | undefined): string | undefined {
+  try {
+    const parsed = JSON.parse(input);
+    for (const key of FILE_KEYS) {
+      if (typeof parsed?.[key] === 'string' && parsed[key]) {
+        return parsed[key];
+      }
+    }
+  } catch {
+    // Not JSON.
+  }
+  const m = hint && /^(?:Read|Reading|Edited|Editing|Created|Creating|Viewed|Viewing)\s+(\S+?)[,.]?(?:\s|$)/.exec(hint);
+  return m && (path.isAbsolute(m[1]) || /^[A-Za-z]:[\\/]/.test(m[1])) ? path.normalize(m[1]) : undefined;
+}
+
+/**
+ * The same facts from a parsed transcript, for tools whose logs collectHandoffFacts doesn't read (GitHub Copilot CLI,
+ * VS Code Chat). Files come from the tool calls, relative ones resolved against `cwd`; skills and to-dos aren't
+ * recorded the same way, so they stay empty.
+ */
+export function collectTranscriptFacts(entries: TranscriptEntry[], cwd?: string): HandoffFacts {
+  const facts: HandoffFacts = { modified: [], read: [], todos: [], skills: [], mcpServers: [] };
+  const mcpServers = new Set<string>();
+  const modified = new Set<string>();
+  const read = new Set<string>();
+  const touch = (set: Set<string>, file: string) => {
+    set.delete(file);
+    set.add(file);
+  };
+  let turn: string[] = [];
+  let final: string[] = [];
+  for (const e of entries) {
+    if (e.role === 'user') {
+      const text = e.parts.map((p) => (p.kind === 'text' ? p.text : '')).join('\n').trim();
+      if (text) {
+        facts.previousPrompt = facts.lastPrompt;
+        facts.lastPrompt = text;
+        turn = [];
+        final = [];
+      }
+      continue;
+    }
+    if (e.role !== 'assistant') {
+      continue;
+    }
+    for (const p of e.parts) {
+      if (p.kind === 'text' && p.text.trim()) {
+        turn.push(p.text.trim());
+        final.push(p.text.trim());
+      } else if (p.kind === 'tool_use') {
+        final = [];
+        const server = /^mcp__(.+?)__/.exec(p.name)?.[1];
+        if (server) {
+          mcpServers.add(`mcp__${server}`);
+        }
+        const named = toolFile(p.input, p.hint);
+        const file = named && cwd && !path.isAbsolute(named) ? path.join(cwd, named) : named;
+        if (file && MODIFY_TOOL.test(p.name)) {
+          touch(modified, file);
+        } else if (file && READ_TOOL.test(p.name)) {
+          touch(read, file);
+        }
+      }
+    }
+  }
+  const finalText = final.join('\n\n');
+  const turnText = turn.join('\n\n');
+  if (finalText.length >= MIN_FINAL_REPLY || (finalText && finalText === turnText)) {
+    facts.lastReply = finalText;
+  } else if (turnText) {
+    facts.lastReply = turnText;
+    facts.replyIsWholeTurn = true;
+  }
+  facts.mcpServers = [...mcpServers];
+  facts.modified = [...modified];
+  facts.read = [...read].filter((f) => !modified.has(f));
+  return facts;
+}
+
 /** Windows allows ~32k characters on a command line and the handoff is passed as an argument; stay well under. */
 export const MAX_HANDOFF = 16000;
 
@@ -198,26 +285,40 @@ function fileList(files: string[], cwd: string | undefined, max: number): string
 }
 
 /**
- * The prompt that starts the new session. It ends by asking Claude to summarise and wait, because the CLI sends a
- * prompt given on the command line straight away.
+ * The prompt that starts the new session in `target` (by default the session's own tool). It ends by asking for a
+ * summary and a wait, because the CLIs send a prompt given on the command line straight away.
  */
-export function buildHandoff(session: SessionInfo, facts: HandoffFacts, cwd: string | undefined, gitStatus?: string): string {
+export function buildHandoff(
+  session: SessionInfo,
+  facts: HandoffFacts,
+  cwd: string | undefined,
+  gitStatus?: string,
+  target: SessionSource = sourceOf(session),
+): string {
   for (const lim of LIMITS) {
-    const text = render(session, facts, cwd, gitStatus, lim);
+    const text = render(session, facts, cwd, gitStatus, lim, target);
     if (text.length <= MAX_HANDOFF) {
       return text;
     }
   }
-  return clip(render(session, facts, cwd, gitStatus, LIMITS[LIMITS.length - 1]), MAX_HANDOFF - 10);
+  return clip(render(session, facts, cwd, gitStatus, LIMITS[LIMITS.length - 1], target), MAX_HANDOFF - 10);
 }
 
-function render(session: SessionInfo, f: HandoffFacts, cwd: string | undefined, gitStatus: string | undefined, lim: Limits): string {
+function render(
+  session: SessionInfo,
+  f: HandoffFacts,
+  cwd: string | undefined,
+  gitStatus: string | undefined,
+  lim: Limits,
+  target: SessionSource,
+): string {
   const about = [`"${session.title}"`, session.gitBranch && `on branch ${session.gitBranch}`, session.prUrl && `PR ${session.prUrl}`]
     .filter(Boolean)
     .join(', ');
-  const out = [
-    `I'm continuing work from an earlier Claude Code session (${about}). This is a handoff of where it left off.`,
-  ];
+  const from = SOURCES[sourceOf(session)].label;
+  // Across tools the new assistant didn't write the earlier replies, so they aren't "yours".
+  const sameTool = target === sourceOf(session);
+  const out = [`I'm continuing work from an earlier ${from} session (${about}). This is a handoff of where it left off.`];
   if (f.lastPrompt) {
     out.push(`## My last request\n${clip(f.lastPrompt, lim.text)}`);
     if (f.previousPrompt && f.lastPrompt.trim().length < SHORT_PROMPT) {
@@ -226,7 +327,7 @@ function render(session: SessionInfo, f: HandoffFacts, cwd: string | undefined, 
   }
   if (f.lastReply) {
     const reply = f.replyIsWholeTurn ? clipStart(f.lastReply, lim.text) : clip(f.lastReply, lim.text, ' […] (rest in the transcript)');
-    out.push(`## Your last reply\n${reply}`);
+    out.push(`## ${sameTool ? 'Your last reply' : `${SOURCES[sourceOf(session)].assistant}'s last reply`}\n${reply}`);
   }
   if (f.todos.length) {
     out.push(`## Unfinished to-dos\n${f.todos.slice(0, lim.files).map((t) => `- [${t.status}] ${t.content}`).join('\n')}`);

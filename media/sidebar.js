@@ -177,7 +177,7 @@
         <div class="meta">${meta}</div>
         <div class="card-actions">
           <button class="icon-btn accent" data-action="resume" title="${esc(info.resumeTitle)} (Ctrl+Enter)"><i class="codicon codicon-${s.source === 'vscode-chat' ? 'chat-sparkle' : 'play'}"></i></button>
-          ${claude ? '<button class="icon-btn" data-action="continueInNewSession" title="Continue in a new session: starts the CLI with a handoff of where this one left off"><i class="codicon codicon-arrow-circle-right"></i></button>' : ''}
+          <button class="icon-btn" data-action="continueInNewSession" title="${s.source === 'vscode-chat' ? 'Continue in a new chat, with a handoff of where this one left off' : 'Continue in a new session: starts the CLI with a handoff of where this one left off'}"><i class="codicon codicon-arrow-circle-right"></i></button>
           ${claude && state.hasClaudeCode ? '<button class="icon-btn" data-action="openInClaudeCode" title="Open in Claude Code chat"><i class="codicon codicon-comment-discussion"></i></button>' : ''}
           <button class="icon-btn" data-action="openTranscript" title="Read transcript (Enter)"><i class="codicon codicon-book"></i></button>
           <button class="icon-btn" data-action="copyId" title="Copy session ID"><i class="codicon codicon-copy"></i></button>

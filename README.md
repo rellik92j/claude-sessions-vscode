@@ -88,7 +88,8 @@ The sidebar also lists your [GitHub Copilot CLI](https://docs.github.com/en/copi
 
 - **Source chips** under the search box: **All**, then one chip per tool with its session count. Click a chip to show only that tool's sessions, then click others to add them. Click a chosen chip to remove it, and removing the last one goes back to **All**. The chips appear once more than one tool has sessions. They change the current window only. The `claudeSessions.sources` setting chooses what a new window starts with.
 - **Resume** runs `copilot --resume <id>` for a Copilot CLI session. For a VS Code chat, the button reads **Open in Chat**. It opens the conversation in this window if the chat belongs to this window's folder. If it doesn't, you can open that folder in a new window, because VS Code shows a chat only in the window of its own folder.
-- Continue in New Session, Open in Claude Code Chat, and the usage and cost figures are for Claude Code sessions only. Copilot logs record no token usage, so the overview labels its cost **Claude only** when other tools are shown. The overview has its own source chips.
+- **Continue in New Session** works for these sessions too. A Copilot CLI session continues in a new Copilot CLI session. A VS Code chat continues in a new chat in agent mode, with the handoff in the input box so you can pick a model and press Enter.
+- Open in Claude Code Chat, and the usage and cost figures, are for Claude Code sessions only. Copilot logs record no token usage, so the overview labels its cost **Claude only** when other tools are shown. The overview has its own source chips.
 
 Sessions are read from `~/.copilot/session-state` (or `$COPILOT_HOME`), and from the `workspaceStorage` folders of VS Code and VS Code Insiders. Chats from remote, WSL or SSH windows, and from other editors built on VS Code, are not included.
 
@@ -98,7 +99,7 @@ Sessions are read from `~/.copilot/session-state` (or `$COPILOT_HOME`), and from
 
 - **Resume** (▶) opens `claude --resume <id>` in a terminal tab beside your editor, in the session's project folder. If the session is already open, its terminal is focused instead.
 - **Continue in New Session** (⮕) starts a fresh session with a handoff of where the old one stopped. The handoff includes your last request, Claude's last reply, the files it edited and read, any open to-dos, the current `git status`, and the path to the old transcript. Claude is asked to summarize and wait for your instruction before changing anything. Use this when a session has grown too long to keep working in.
-- **Continue in New Session with Model…** does the same, but first asks which model and effort level the new session should use, instead of your Claude Code settings. Find it in a card's right-click menu, or click the ⌄ next to **Continue in new session** in a transcript.
+- **Continue in New Session with Tool or Model…** does the same, but first asks where the new session runs: Claude Code, GitHub Copilot CLI or VS Code Chat. For a CLI it then asks which model and effort level to use, instead of that CLI's settings. This also lets you move work between tools, for example from a Copilot chat to Claude Code. Find it in a card's right-click menu, or click the ⌄ next to **Continue in new session** in a transcript.
 - **Open in Claude Code Chat** reopens the session in the chat panel of the official Claude Code extension, if you have it installed.
 
 The sidebar refreshes on its own as sessions change, and everything follows your VS Code color theme.

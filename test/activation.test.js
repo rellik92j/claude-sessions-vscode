@@ -244,12 +244,12 @@ test('bundled extension activates, fills the sidebar, and renders a transcript',
     const titles = [];
     state.pick = (items, options) => {
       titles.push(options.title);
-      return items.find((i) => i.value === (titles.length === 1 ? 'sonnet' : 'xhigh'));
+      return items.find((i) => i.value === ['claude', 'sonnet', 'xhigh'][titles.length - 1]);
     };
     await state.panels[0].onMessage({ command: 'continueInNewSessionWithModel' });
     await new Promise((r) => setTimeout(r, 300));
     const tm = state.terminals.pop();
-    assert.equal(titles.length, 2);
+    assert.equal(titles.length, 3, 'tool, model, effort');
     assert.deepEqual(tm.shellArgs.slice(0, 6), ['--model', 'sonnet', '--effort', 'xhigh', '--name', 'Continued: Session bbbb']);
     // Default for both adds no flags; cancelling starts nothing.
     state.pick = (items) => items[0];
@@ -417,19 +417,17 @@ test('Copilot CLI and VS Code Chat sessions: source chips, filters, search, tran
     assert.match(html, /source-avatar/);
     assert.match(html, /<strong>Copilot<\/strong>/);
     assert.match(html, /<span>Open in Chat<\/span>/);
-    assert.doesNotMatch(html, /data-cmd="continueInNewSession"/);
+    assert.match(html, /data-cmd="continueInNewSession" title="Start a new chat/);
     await state.commands['claudeSessions.openTranscript']({ sessionKey: `copilot-cli:${shared}` });
     html = state.panels[0].webview.html;
     assert.match(html, /GitHub Copilot CLI/);
     assert.match(html, /Create Chat Session/);
 
-    // Claude-only commands refuse other sources; resuming Copilot runs its CLI in the session's folder.
+    // Open in Claude Code Chat refuses other sources; resuming Copilot runs its CLI in the session's folder.
     const copilotSession = { sessionKey: `copilot-cli:${shared}` };
-    await state.commands['claudeSessions.continueInNewSession'](copilotSession);
     await state.commands['claudeSessions.openInClaudeCode'](copilotSession);
     assert.equal(state.terminals.length, 0);
-    assert.equal(state.infos.length, 2);
-    assert.match(state.infos[0], /only for Claude Code sessions/);
+    assert.match(state.infos.pop(), /only for Claude Code sessions/);
     await state.commands['claudeSessions.resume'](copilotSession);
     const t = state.terminals.pop();
     assert.equal(t.sent, `copilot --resume ${shared}`);
@@ -439,6 +437,48 @@ test('Copilot CLI and VS Code Chat sessions: source chips, filters, search, tran
     // A chat from another workspace offers that folder's window instead of opening here.
     await state.commands['claudeSessions.resume']({ sessionKey: chat.id });
     assert.match(state.infos.pop(), /VS Code opens a chat only in the window of its own folder/);
+
+    // Continue in New Session, Copilot CLI: one shell line pointing at the handoff file, which the CLI may read.
+    await state.commands['claudeSessions.continueInNewSession'](copilotSession);
+    const ct = state.terminals.pop();
+    assert.match(ct.name, /^GitHub Copilot CLI · Continued: Create Chat Session/);
+    const line = ct.sent;
+    assert.doesNotMatch(line, /\n/);
+    const [, dir] = /--add-dir "([^"]+)"/.exec(line);
+    const [, file] = /Read the handoff in (.+?\.md):/.exec(line);
+    assert.ok(file.startsWith(dir));
+    assert.match(line, /--name "Continued: Create Chat Session" -i "/);
+    const copilotHandoff = fs.readFileSync(file, 'utf8');
+    fs.rmSync(file);
+    assert.match(copilotHandoff, /^I'm continuing work from an earlier GitHub Copilot CLI session \("Create Chat Session"\)/);
+    assert.match(copilotHandoff, /## My last request\nThis is a chat session/);
+    assert.match(copilotHandoff, /## Your last reply\nHello!/);
+
+    // VS Code Chat: a new chat in agent mode with the handoff typed in but not sent.
+    const chatOpens = [];
+    state.commands['workbench.action.chat.newChat'] = () => chatOpens.push('new');
+    state.commands['workbench.action.chat.open'] = (o) => chatOpens.push(o);
+    await state.commands['claudeSessions.continueInNewSession']({ sessionKey: chat.id });
+    assert.equal(chatOpens[0], 'new');
+    assert.equal(chatOpens[1].mode, 'agent');
+    assert.equal(chatOpens[1].isPartialQuery, true);
+    assert.match(chatOpens[1].query, /^I'm continuing work from an earlier VS Code Chat session \("Chat session overview"\)/);
+
+    // Into another tool: pick Claude Code for the Copilot session; the earlier replies are Copilot's, not "yours".
+    state.pick = (items) => items.find((i) => i.value === 'claude') ?? items[0];
+    await state.commands['claudeSessions.continueInNewSessionWithModel'](copilotSession);
+    const cc = state.terminals.pop();
+    assert.equal(cc.shellPath, 'claude');
+    const crossHandoff = cc.shellArgs[cc.shellArgs.length - 1];
+    assert.match(crossHandoff, /## Copilot's last reply\nHello!/);
+    // A VS Code chat as the target takes no model or effort.
+    let picks = 0;
+    state.pick = (items) => (picks++, items.find((i) => i.value === 'vscode-chat'));
+    chatOpens.length = 0;
+    await state.commands['claudeSessions.continueInNewSessionWithModel']({ sessionKey: `claude:${shared}` });
+    assert.equal(picks, 1);
+    assert.match(chatOpens[1].query, /earlier Claude Code session/);
+    assert.match(chatOpens[1].query, /## Claude's last reply|## My last request/);
     assert.deepEqual(state.errors, []);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

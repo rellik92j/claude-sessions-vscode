@@ -5,9 +5,8 @@ import * as vscode from 'vscode';
 import { escapeHtml, formatDateTime, formatTokens, formatUsd } from './format';
 import { renderMarkdown } from './markdown';
 import { projectName, projectPath, SessionModel } from './model';
-import { parseCopilotTranscript } from './copilotCliParser';
-import { parseTranscript, SessionInfo, TranscriptEntry, TranscriptPart } from './sessionParser';
-import { parseChatTranscript } from './vscodeChatParser';
+import { SessionInfo, TranscriptEntry, TranscriptPart } from './sessionParser';
+import { parseTranscriptFor } from './transcripts';
 import { isClaude, NO_FOLDER, sessionKey, SourceInfo, SOURCES, sourceOf } from './sources';
 import { UsageSummary } from './usage';
 
@@ -147,7 +146,7 @@ export class TranscriptPanels {
         : new vscode.ThemeIcon(isClaude(session) ? 'comment-discussion' : SOURCES[sourceOf(session)].icon);
     let entries: TranscriptEntry[];
     try {
-      entries = readTranscript(session, await fs.readFile(session.filePath, 'utf8'));
+      entries = parseTranscriptFor(session, await fs.readFile(session.filePath, 'utf8'));
     } catch (err) {
       vscode.window.showErrorMessage(`Could not read session log: ${(err as Error).message}`);
       return;
@@ -165,18 +164,6 @@ export class TranscriptPanels {
       css: webview.asWebviewUri(vscode.Uri.joinPath(this.mediaUri, 'transcript.css')).toString(),
       js: webview.asWebviewUri(vscode.Uri.joinPath(this.mediaUri, 'transcript.js')).toString(),
     });
-  }
-}
-
-/** The session's log as transcript entries, read with the parser for its source. */
-function readTranscript(session: SessionInfo, text: string): TranscriptEntry[] {
-  switch (sourceOf(session)) {
-    case 'copilot-cli':
-      return parseCopilotTranscript(text);
-    case 'vscode-chat':
-      return parseChatTranscript(text);
-    default:
-      return parseTranscript(text);
   }
 }
 
@@ -555,12 +542,8 @@ export function buildHtml(session: SessionInfo, entries: TranscriptEntry[], o: H
   <div class="topbar-title"><span class="${claude ? 'claude-dot' : 'source-dot'}">${assistantMark(source)}</span><span>${escapeHtml(session.title)}</span></div>
   <div class="topbar-actions">
     <button class="btn primary" data-cmd="resume" title="${escapeHtml(source.resumeTitle)}"><i class="codicon codicon-${source.id === 'vscode-chat' ? 'chat-sparkle' : 'play'}"></i><span>${escapeHtml(source.resumeLabel)}</span></button>
-    ${
-      claude
-        ? `<button class="btn" data-cmd="continueInNewSession" title="Start a new Claude Code CLI session with a handoff of where this one left off"><i class="codicon codicon-arrow-circle-right"></i><span>Continue in new session</span></button>
-    <button class="icon-btn" data-cmd="continueInNewSessionWithModel" title="Continue in a new session with a different model or effort…"><i class="codicon codicon-chevron-down"></i></button>`
-        : ''
-    }
+    <button class="btn" data-cmd="continueInNewSession" title="${escapeHtml(source.id === 'vscode-chat' ? 'Start a new chat with a handoff of where this one left off' : `Start a new ${source.label} session with a handoff of where this one left off`)}"><i class="codicon codicon-arrow-circle-right"></i><span>Continue in new session</span></button>
+    <button class="icon-btn" data-cmd="continueInNewSessionWithModel" title="Continue in another tool, or with a different model or effort…"><i class="codicon codicon-chevron-down"></i></button>
     ${claude && o.hasClaudeCode ? '<button class="btn" data-cmd="openInClaudeCode" title="Open in the Claude Code chat"><i class="codicon codicon-comment-discussion"></i><span>Open in chat</span></button>' : ''}
     ${o.preview ? '<button class="btn" data-cmd="keepOpen" title="This tab is reused for the next transcript you open. Keep this one in its own tab."><i class="codicon codicon-pinned"></i><span>Keep open</span></button>' : ''}
     <button class="icon-btn" data-cmd="refresh" title="Reload"><i class="codicon codicon-refresh"></i></button>

@@ -1,15 +1,17 @@
 import { execFile } from 'child_process';
 import { existsSync } from 'fs';
 import * as fs from 'fs/promises';
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { formatRelative, isInside } from './format';
-import { buildHandoff, collectHandoffFacts } from './handoff';
-import { GroupBy, projectName, projectPath, SessionModel } from './model';
+import { buildHandoff, collectHandoffFacts, collectTranscriptFacts } from './handoff';
+import { GroupBy, projectName, projectPath, SessionModel, workspaceFolderPaths } from './model';
 import { isEmptyQuery, parseQuery } from './query';
-import { SessionInfo } from './sessionParser';
+import { SessionInfo, SessionSource } from './sessionParser';
 import { defaultCopilotDir, defaultProjectsDir, defaultVsCodeUserDirs, SessionStore, SourceRoots, sortTime } from './sessionStore';
-import { isClaude, sessionKey, SOURCES, sourceOf, toSources } from './sources';
+import { isClaude, sessionKey, SOURCE_IDS, SOURCES, sourceOf, toSources } from './sources';
+import { parseTranscriptFor } from './transcripts';
 import { OverviewPanel } from './overviewPanel';
 import { SidebarView } from './sidebarView';
 import { TranscriptPanels } from './transcriptPanel';
@@ -277,11 +279,15 @@ export function activate(context: vscode.ExtensionContext): void {
    * Starts a new CLI session whose first prompt is a handoff of where this one left off, optionally with a model
    * and effort that override the user's Claude Code settings.
    */
-  const continueInNewSession = async (session: SessionInfo, overrides: Overrides = {}) => {
+  /**
+   * Starts a new session in `target` (by default the session's own tool) whose first prompt is a handoff of where this
+   * one left off. `overrides` (model, effort) apply to the CLIs; a VS Code chat uses its own model picker.
+   */
+  const continueInNewSession = async (session: SessionInfo, overrides: Overrides = {}, target: SessionSource = sourceOf(session)) => {
     const cwd = projectPath(session);
-    const hasCwd = existsSync(cwd);
-    if (!hasCwd) {
-      vscode.window.showWarningMessage(`The session's folder no longer exists (${cwd}). The new session starts in the default folder.`);
+    const hasCwd = !!cwd && existsSync(cwd);
+    if (!hasCwd && target !== 'vscode-chat') {
+      vscode.window.showWarningMessage(`The session's folder no longer exists (${cwd || 'unknown'}). The new session starts in the default folder.`);
     }
     let log: string;
     try {
@@ -290,9 +296,16 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.window.showErrorMessage(`Could not read session log: ${(err as Error).message}`);
       return;
     }
-    const handoff = buildHandoff(session, collectHandoffFacts(log), cwd, hasCwd ? await gitStatus(cwd) : undefined);
+    const facts = isClaude(session) ? collectHandoffFacts(log) : collectTranscriptFacts(parseTranscriptFor(session, log), cwd || undefined);
+    const handoff = buildHandoff(session, facts, cwd || undefined, hasCwd ? await gitStatus(cwd) : undefined, target);
     // Continuing a continued session keeps one "Continued: " rather than stacking them.
     const title = session.title.replace(/^(Continued: )+/, '');
+    if (target === 'vscode-chat') {
+      return continueInChat(session, handoff);
+    }
+    if (target === 'copilot-cli') {
+      return continueInCopilot(handoff, title, hasCwd ? cwd : undefined, overrides);
+    }
     const [shellPath, ...shellArgs] = claudeCommandParts();
     // The CLI is the terminal's process rather than a command typed into a shell, so the multi-line handoff arrives
     // as one argument whatever the shell's quoting rules (Windows PowerShell 5.1 strips embedded double quotes).
@@ -310,6 +323,52 @@ export function activate(context: vscode.ExtensionContext): void {
       ],
     });
     terminal.show();
+  };
+
+  /**
+   * Copilot CLI is often a .bat or .ps1 shim on Windows, which would split a multi-line argument, so the handoff goes
+   * in a file the CLI is given access to, and the one-line prompt typed into the shell points at it.
+   */
+  const continueInCopilot = async (handoff: string, title: string, cwd: string | undefined, overrides: Overrides) => {
+    const dir = path.join(os.tmpdir(), 'claude-sessions-handoffs');
+    const file = path.join(dir, `handoff-${Date.now()}.md`);
+    try {
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(file, handoff, 'utf8');
+    } catch (err) {
+      vscode.window.showErrorMessage(`Could not write the handoff: ${(err as Error).message}`);
+      return;
+    }
+    // Double quotes are the one quoting PowerShell, cmd and POSIX shells share; values never contain them.
+    const quote = (s: string) => `"${s.replace(/"/g, "'")}"`;
+    const command = config().get<string>('copilotCommand', 'copilot') || 'copilot';
+    const args = [
+      '--add-dir',
+      quote(dir),
+      ...(overrides.model ? ['--model', quote(overrides.model)] : []),
+      ...(overrides.effort ? ['--reasoning-effort', overrides.effort] : []),
+      '--name',
+      quote(`Continued: ${title}`),
+      '-i',
+      quote(`Read the handoff in ${file}: it describes where an earlier session left off. Then do what its last paragraph asks.`),
+    ];
+    const terminal = vscode.window.createTerminal(
+      claudeTerminalOptions(`GitHub Copilot CLI · Continued: ${title.slice(0, 30)}`, cwd, new vscode.ThemeIcon(SOURCES['copilot-cli'].icon)),
+    );
+    terminal.show();
+    terminal.sendText(`${command} ${args.join(' ')}`);
+  };
+
+  /** A new VS Code chat in agent mode with the handoff in its input box, for you to review, pick a model and send. */
+  const continueInChat = async (session: SessionInfo, handoff: string) => {
+    await vscode.commands.executeCommand('workbench.action.chat.newChat');
+    await vscode.commands.executeCommand('workbench.action.chat.open', { mode: 'agent', query: handoff, isPartialQuery: true });
+    const cwd = projectPath(session);
+    if (cwd && !workspaceFolderPaths().some((f) => isInside(cwd, f))) {
+      vscode.window.showInformationMessage(
+        `The handoff is in a new chat. That chat works in this window's folder, not in ${cwd}, where the session ran.`,
+      );
+    }
   };
 
   const openInClaudeCode = async (session: SessionInfo) => {
@@ -368,16 +427,13 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('claudeSessions.showCurrentWorkspaceOnly', () => setConfig('currentWorkspaceOnly', true)),
     vscode.commands.registerCommand('claudeSessions.showAll', () => setConfig('currentWorkspaceOnly', false)),
     vscode.commands.registerCommand('claudeSessions.resume', withSession(resume)),
-    vscode.commands.registerCommand(
-      'claudeSessions.continueInNewSession',
-      withClaudeSession('Continue in New Session', (s) => continueInNewSession(s)),
-    ),
+    vscode.commands.registerCommand('claudeSessions.continueInNewSession', withSession((s) => continueInNewSession(s))),
     vscode.commands.registerCommand(
       'claudeSessions.continueInNewSessionWithModel',
-      withClaudeSession('Continue in New Session', async (s) => {
-        const overrides = await pickOverrides(s);
-        if (overrides) {
-          await continueInNewSession(s, overrides);
+      withSession(async (s) => {
+        const choice = await pickContinuation(s);
+        if (choice) {
+          await continueInNewSession(s, choice.overrides, choice.target);
         }
       }),
     ),
@@ -445,39 +501,74 @@ interface ValuePick extends vscode.QuickPickItem {
 const OTHER_MODEL = '\0other';
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
-/** Asks for the model, then the effort, of a continued session. Undefined when either step is cancelled. */
-async function pickOverrides(session: SessionInfo): Promise<Overrides | undefined> {
+/**
+ * Asks which tool the new session runs in, then (for a CLI) its model and effort. Undefined when any step is cancelled.
+ * A VS Code chat has its own model picker, so it takes no overrides.
+ */
+async function pickContinuation(session: SessionInfo): Promise<{ target: SessionSource; overrides: Overrides } | undefined> {
   const title = 'Continue in New Session';
+  const own = sourceOf(session);
+  const tools = [own, ...SOURCE_IDS.filter((id) => id !== own)].map((id) => ({
+    label: `$(${id === 'claude' ? 'sparkle' : SOURCES[id].icon}) ${SOURCES[id].label}`,
+    description: id === own ? 'same as this session' : undefined,
+    detail: id === 'vscode-chat' ? 'A new chat with the handoff in the input box, to send when you are ready' : undefined,
+    value: id,
+  }));
+  const tool = await vscode.window.showQuickPick(tools, { title: `${title} (1/3): tool`, placeHolder: 'Where the new session runs' });
+  if (!tool) {
+    return undefined;
+  }
+  const target = tool.value;
+  if (target === 'vscode-chat') {
+    return { target, overrides: {} };
+  }
+  const overrides = await pickOverrides(session, target, title);
+  return overrides && { target, overrides };
+}
+
+/** Asks for the model, then the effort, of a continued CLI session. Undefined when either step is cancelled. */
+async function pickOverrides(session: SessionInfo, target: SessionSource, title: string): Promise<Overrides | undefined> {
   const usedHere = 'used by this session';
-  // Aliases always mean the latest model of each family, so the list doesn't go stale.
+  const claude = target === 'claude';
+  const settings = claude ? 'whatever your Claude Code settings say' : 'whatever your Copilot CLI settings say';
+  // Aliases always mean the latest model of each family, so the list doesn't go stale. Copilot CLI's models change
+  // with your plan, so it is offered the session's own model and a free-form name.
   const models: ValuePick[] = [
-    { label: '$(settings-gear) Default', description: 'whatever your Claude Code settings say' },
-    { label: 'Opus', description: 'opus · latest Opus', value: 'opus' },
-    { label: 'Sonnet', description: 'sonnet · latest Sonnet', value: 'sonnet' },
-    { label: 'Haiku', description: 'haiku · latest Haiku', value: 'haiku' },
-    { label: 'Fable', description: 'fable · latest Fable', value: 'fable' },
-    ...(session.model ? [{ label: session.model, description: usedHere, value: session.model }] : []),
+    { label: '$(settings-gear) Default', description: settings },
+    ...(claude
+      ? [
+          { label: 'Opus', description: 'opus · latest Opus', value: 'opus' },
+          { label: 'Sonnet', description: 'sonnet · latest Sonnet', value: 'sonnet' },
+          { label: 'Haiku', description: 'haiku · latest Haiku', value: 'haiku' },
+          { label: 'Fable', description: 'fable · latest Fable', value: 'fable' },
+        ]
+      : []),
+    ...(session.model && sourceOf(session) === target ? [{ label: session.model, description: usedHere, value: session.model }] : []),
     { label: '$(edit) Other model…', description: 'enter a model name', value: OTHER_MODEL },
   ];
-  const model = await vscode.window.showQuickPick(models, { title: `${title} (1/2): model`, placeHolder: 'Model for the new session' });
+  const model = await vscode.window.showQuickPick(models, { title: `${title} (2/3): model`, placeHolder: 'Model for the new session' });
   if (!model) {
     return undefined;
   }
   let modelValue = model.value;
   if (modelValue === OTHER_MODEL) {
     modelValue = (
-      await vscode.window.showInputBox({ title, prompt: 'Model alias or full name, as for claude --model', placeHolder: 'claude-opus-5-5' })
+      await vscode.window.showInputBox({
+        title,
+        prompt: claude ? 'Model alias or full name, as for claude --model' : 'Model name, as for copilot --model',
+        placeHolder: claude ? 'claude-opus-5-5' : 'gpt-5.4',
+      })
     )?.trim();
     if (!modelValue) {
       return undefined;
     }
   }
-  const sessionEffort = session.usage?.effort;
+  const sessionEffort = sourceOf(session) === target ? session.usage?.effort : undefined;
   const efforts: ValuePick[] = [
-    { label: '$(settings-gear) Default', description: 'whatever your Claude Code settings say' },
+    { label: '$(settings-gear) Default', description: settings },
     ...EFFORTS.map((e) => ({ label: e, description: e === sessionEffort ? usedHere : undefined, value: e })),
   ];
-  const effort = await vscode.window.showQuickPick(efforts, { title: `${title} (2/2): effort`, placeHolder: 'Effort level for the new session' });
+  const effort = await vscode.window.showQuickPick(efforts, { title: `${title} (3/3): effort`, placeHolder: 'Effort level for the new session' });
   if (!effort) {
     return undefined;
   }

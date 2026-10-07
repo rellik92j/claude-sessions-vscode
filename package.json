@@ -87,7 +87,7 @@
       },
       {
         "command": "claudeSessions.continueInNewSessionWithModel",
-        "title": "Continue in New Session with Model…",
+        "title": "Continue in New Session with Tool or Model…",
         "category": "Claude Sessions"
       },
       {
@@ -239,12 +239,12 @@
         },
         {
           "command": "claudeSessions.continueInNewSession",
-          "when": "webviewId == 'claudeSessions.list' && webviewSection == 'session' && sessionSource == 'claude'",
+          "when": "webviewId == 'claudeSessions.list' && webviewSection == 'session'",
           "group": "1_main@2"
         },
         {
           "command": "claudeSessions.continueInNewSessionWithModel",
-          "when": "webviewId == 'claudeSessions.list' && webviewSection == 'session' && sessionSource == 'claude'",
+          "when": "webviewId == 'claudeSessions.list' && webviewSection == 'session'",
           "group": "1_main@3"
         },
         {
