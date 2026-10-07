@@ -291,6 +291,13 @@ export function parseSession(
         for (const p of content) {
           if (p?.type === 'text' && typeof p.text === 'string' && p.text.trim()) {
             searchParts.push(p.text);
+          } else if (p?.type === 'tool_use' && p.input && typeof p.input === 'object') {
+            // Files a tool read or changed, so searching for a file finds sessions that touched it without naming it.
+            for (const key of ['file_path', 'notebook_path', 'path']) {
+              if (typeof p.input[key] === 'string' && p.input[key].trim()) {
+                searchParts.push(p.input[key]);
+              }
+            }
           }
         }
       }

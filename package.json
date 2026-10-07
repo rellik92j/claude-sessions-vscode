@@ -141,6 +141,12 @@
         "icon": "$(search)"
       },
       {
+        "command": "claudeSessions.searchForFile",
+        "title": "Search Claude Sessions for This File",
+        "category": "Claude Sessions",
+        "icon": "$(search)"
+      },
+      {
         "command": "claudeSessions.openOverview",
         "title": "Open Overview",
         "category": "Claude Sessions",
@@ -229,6 +235,10 @@
         {
           "command": "claudeSessions.openInClaudeCode",
           "when": "false"
+        },
+        {
+          "command": "claudeSessions.searchForFile",
+          "when": "resourceFilename"
         }
       ],
       "webview/context": [
@@ -286,6 +296,20 @@
           "command": "claudeSessions.revealFolder",
           "when": "webviewId == 'claudeSessions.list' && webviewSection == 'project'",
           "group": "1_main@1"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "claudeSessions.searchForFile",
+          "when": "!explorerResourceIsFolder",
+          "group": "7_claudeSessions"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "claudeSessions.searchForFile",
+          "when": "resourceFilename",
+          "group": "7_claudeSessions"
         }
       ]
     },

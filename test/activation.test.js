@@ -188,6 +188,12 @@ test('bundled extension activates, fills the sidebar, and renders a transcript',
     assert.deepEqual(search('"toggle dark"').ids, []);
     assert.deepEqual(search('toggle -const').ids, []);
 
+    // Right-clicking a file searches the sidebar for its name, quoted when it has spaces.
+    await state.commands['claudeSessions.searchForFile'](vscode.Uri.file(path.join('C:', 'repo', 'toggle.ts')));
+    assert.deepEqual(posted.filter((m) => m.type === 'setQuery').pop(), { type: 'setQuery', query: 'toggle.ts' });
+    await state.commands['claudeSessions.searchForFile'](vscode.Uri.file(path.join('C:', 'repo', 'dark mode.md')));
+    assert.equal(posted.filter((m) => m.type === 'setQuery').pop().query, '"dark mode.md"');
+
     // Opening from a search passes the words on to the transcript page.
     handler({ type: 'run', command: 'openTranscript', id: 'aaaa-1111', highlight: ['const', 42] });
     await new Promise((r) => setTimeout(r, 100));

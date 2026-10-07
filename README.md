@@ -25,7 +25,9 @@ The sidebar refreshes on its own as sessions change, and everything follows your
 
 ![Searching sessions, with the matching passage shown under each card](docs/images/search.png)
 
-Press `/` to search. The search covers the card details and the full conversation: your prompts and Claude's replies, but not tool output. When a session matches inside its conversation, its card shows the matching passage.
+Press `/` to search. The search covers the card details and the full conversation: your prompts and Claude's replies, and the paths of files Claude's tools read or edited, but not tool output. When a session matches inside its conversation, its card shows the matching passage.
+
+To find the sessions that worked on a file, right-click it in the Explorer or right-click its editor tab and choose **Search Claude Sessions for This File**. The sidebar opens with the file name in the search box.
 
 | Type | To find |
 | --- | --- |
