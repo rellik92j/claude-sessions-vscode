@@ -1,62 +1,33 @@
 // Token usage, API-priced cost, context fill and prompt-cache state from Claude Code session logs.
 // No VS Code imports here so it can be unit-tested with plain Node.
 
-/** USD per million tokens. Cache writes are 1.25x (5 minutes) and 2x (1 hour) the input price. */
-interface Price {
+import prices from './prices.json';
+
+/** USD per million tokens. */
+interface Rates {
   input: number;
   output: number;
   cacheRead: number;
+  cacheWrite5m: number;
+  cacheWrite1h: number;
+}
+
+interface Price extends Rates {
   /** Context window in tokens. */
   context: number;
   /** Fast mode bills at twice the standard rates on the models that offer it. */
   fast?: boolean;
-  /** Prompts (input plus cache reads and writes) over `above` tokens bill every category at `mult` times the rates. */
-  long?: { above: number; mult: number };
+  /** Rates for prompts (input plus cache reads and writes) over `above` tokens. */
+  long?: Rates & { above: number };
 }
 
 const M = 1_000_000;
 const K200 = 200_000;
-const price = (
-  input: number,
-  output: number,
-  readMultiplier: number,
-  context: number,
-  fast = false,
-  long?: Price['long'],
-): Price => ({
-  input,
-  output,
-  cacheRead: input * readMultiplier,
-  context,
-  fast,
-  long,
-});
 
-// From https://platform.claude.com/docs/en/about-claude/pricing (October 2026), keyed by model id without the
-// "claude-" prefix and date suffix.
-const PRICES: Record<string, Price> = {
-  'fable-5-1': price(10, 50, 0.025, M),
-  'mythos-5-1': price(10, 50, 0.025, M),
-  'fable-5': price(10, 50, 0.1, M),
-  'mythos-5': price(10, 50, 0.1, M),
-  'opus-5-5': price(4, 20, 0.05, M, true),
-  'opus-5': price(5, 25, 0.1, M, true),
-  'opus-4-8': price(5, 25, 0.1, M, true),
-  'opus-4-7': price(5, 25, 0.1, M),
-  'opus-4-6': price(5, 25, 0.1, M),
-  'opus-4-5': price(5, 25, 0.1, K200),
-  'opus-4-1': price(15, 75, 0.1, K200),
-  'opus-4': price(15, 75, 0.1, K200),
-  'sonnet-5-5': price(2, 10, 0.05, M),
-  'sonnet-5': price(2, 10, 0.1, M),
-  'sonnet-4-6': price(3, 15, 0.1, M),
-  'sonnet-4-5': price(3, 15, 0.1, K200),
-  'sonnet-4': price(3, 15, 0.1, K200),
-  '3-7-sonnet': price(3, 15, 0.1, K200),
-  'haiku-5-5': price(0.1, 0.5, 0.1, M, false, { above: 100_000, mult: 5 }),
-  'haiku-4-5': price(1, 5, 0.1, K200),
-  '3-5-haiku': price(0.8, 4, 0.1, K200),
-};
+// Claude API list prices (https://platform.claude.com/docs/en/about-claude/pricing), keyed by model id without the
+// "claude-" prefix and date suffix. scripts/sync-prices.mjs refreshes them from LiteLLM's price map; models it no
+// longer lists, such as retired ones, are kept.
+const PRICES: Record<string, Price> = prices;
 
 const WEB_SEARCH_PRICE = 0.01;
 const TTL_5M = 5 * 60 * 1000;
@@ -206,16 +177,14 @@ export class UsageCollector {
       costs.webSearch += searches * WEB_SEARCH_PRICE;
       if (p) {
         const prompt = t.input + t.cacheWrite5m + t.cacheWrite1h + t.cacheRead;
-        const mult =
-          (req.speed === 'fast' && p.fast ? 2 : 1) *
-          (req.geo === 'us' ? 1.1 : 1) *
-          (p.long && prompt > p.long.above ? p.long.mult : 1);
+        const r: Rates = p.long && prompt > p.long.above ? p.long : p;
+        const mult = (req.speed === 'fast' && p.fast ? 2 : 1) * (req.geo === 'us' ? 1.1 : 1);
         const c: TokenCounts = {
-          input: (t.input * p.input * mult) / M,
-          cacheWrite5m: (t.cacheWrite5m * p.input * 1.25 * mult) / M,
-          cacheWrite1h: (t.cacheWrite1h * p.input * 2 * mult) / M,
-          cacheRead: (t.cacheRead * p.cacheRead * mult) / M,
-          output: (t.output * p.output * mult) / M,
+          input: (t.input * r.input * mult) / M,
+          cacheWrite5m: (t.cacheWrite5m * r.cacheWrite5m * mult) / M,
+          cacheWrite1h: (t.cacheWrite1h * r.cacheWrite1h * mult) / M,
+          cacheRead: (t.cacheRead * r.cacheRead * mult) / M,
+          output: (t.output * r.output * mult) / M,
         };
         for (const k of Object.keys(c) as (keyof TokenCounts)[]) {
           costs[k] += c[k];

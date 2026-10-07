@@ -191,6 +191,7 @@ How the code is laid out:
 | `src/sessionParser.ts`, `src/copilotCliParser.ts`, `src/vscodeChatParser.ts` | Parse Claude Code, GitHub Copilot CLI and VS Code Chat logs |
 | `src/sources.ts`, `src/transcripts.ts` | What differs between the tools, and picking the right parser for a transcript |
 | `src/usage.ts` | Tokens, API-priced cost (also by day and model), context fill and prompt-cache state |
+| `src/prices.json`, `scripts/sync-prices.mjs` | Claude API prices per model; the script refreshes them from LiteLLM's price map, and a weekly workflow opens a pull request when they change |
 | `src/model.ts`, `src/query.ts` | Loaded sessions, grouping and filters, and the search syntax |
 | `src/sidebarView.ts`, `media/sidebar.*` | The sidebar webview |
 | `src/transcriptPanel.ts`, `src/markdown.ts`, `media/transcript.*` | Transcript tabs |
