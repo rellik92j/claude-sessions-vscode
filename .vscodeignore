@@ -2,6 +2,8 @@
 # except the codicon font, which the webviews load as a file.
 src/**
 test/**
+scripts/**
+.github/**
 out/**
 **/*.map
 **/*.ts

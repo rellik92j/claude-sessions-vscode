@@ -1,0 +1,76 @@
+# Weekly: refresh src/prices.json from LiteLLM's price map and open (or update) a pull request when it changed.
+# Needs Settings > Actions > General > "Allow GitHub Actions to create and approve pull requests".
+name: Sync model prices
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency: sync-prices
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      BRANCH: sync-model-prices
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Sync prices
+        run: node scripts/sync-prices.mjs > "$RUNNER_TEMP/changes.md"
+
+      - name: Stop when nothing changed
+        id: diff
+        run: |
+          if git diff --quiet -- src/prices.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Test
+        id: test
+        if: steps.diff.outputs.changed == 'true'
+        continue-on-error: true
+        run: |
+          npm ci
+          npm test 2>&1 | tail -n 12 > "$RUNNER_TEMP/test.txt"
+
+      - name: Open or update the pull request
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          {
+            echo "LiteLLM's price map ([model_prices_and_context_window.json](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json)) differs from \`src/prices.json\`:"
+            echo
+            cat "$RUNNER_TEMP/changes.md"
+            echo
+            echo "Check each change against [Anthropic's pricing page](https://platform.claude.com/docs/en/about-claude/pricing) before merging: LiteLLM is community-maintained and new entries are sometimes corrected within hours."
+            echo
+            echo "\`npm test\`: **${{ steps.test.outcome }}**"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/test.txt"
+            echo '```'
+          } > "$RUNNER_TEMP/body.md"
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -C "$BRANCH"
+          git commit -q -m 'Sync model prices from LiteLLM' -- src/prices.json
+          git push -f origin "$BRANCH"
+
+          if gh pr view "$BRANCH" --json state -q .state 2>/dev/null | grep -q OPEN; then
+            gh pr edit "$BRANCH" --body-file "$RUNNER_TEMP/body.md"
+          else
+            gh pr create --head "$BRANCH" --title 'Sync model prices from LiteLLM' --body-file "$RUNNER_TEMP/body.md"
+          fi
