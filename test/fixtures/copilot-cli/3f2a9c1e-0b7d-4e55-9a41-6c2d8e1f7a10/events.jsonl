@@ -1,0 +1,18 @@
+{"type":"session.start","data":{"sessionId":"3f2a9c1e-0b7d-4e55-9a41-6c2d8e1f7a10","version":1,"producer":"copilot-agent","copilotVersion":"0.0.330","context":{"cwd":"C:\\Users\\me\\repo","branch":"feature/login"}},"id":"2d5dd9b8fe5a9","timestamp":"2026-10-01T10:00:00.000Z"}
+{"type":"session.model_change","data":{"newModel":"claude-sonnet-4.5"},"id":"4a20c35baed908","timestamp":"2026-10-01T10:00:01.000Z"}
+{"type":"user.message","data":{"content":"Why does login redirect to /home?","transformedContent":"<context>injected</context>\nWhy does login redirect to /home?","attachments":[]},"id":"fac2a33b7f14e8","timestamp":"2026-10-01T10:00:05.000Z"}
+{"type":"assistant.turn_start","data":{"turnId":"0"},"id":"02a2c16481f29","timestamp":"2026-10-01T10:00:06.000Z"}
+{"type":"assistant.reasoning","data":{"reasoningId":"r1","content":"secret reasoning"},"id":"ad4f6eaa5ee188","timestamp":"2026-10-01T10:00:07.000Z"}
+{"type":"assistant.message_delta","data":{"messageId":"m1","deltaContent":"Let me"},"id":"e595d894f04108","timestamp":"2026-10-01T10:00:08.000Z"}
+{"type":"assistant.message","data":{"messageId":"m1","content":"Let me look at the router.","toolRequests":[{"toolCallId":"call_1","name":"view","arguments":{"path":"src/router.ts"},"type":"function"}]},"id":"85cb239a2363e","timestamp":"2026-10-01T10:00:09.000Z"}
+{"type":"tool.execution_start","data":{"toolCallId":"call_1","toolName":"view","arguments":{"path":"src/router.ts"}},"id":"7a833e35bbea68","timestamp":"2026-10-01T10:00:10.000Z"}
+{"type":"tool.execution_complete","data":{"toolCallId":"call_1","success":true,"result":{"content":"1. export const home = \"/home\";","detailedContent":"full"}},"id":"d551c454334c8","timestamp":"2026-10-01T10:00:11.000Z"}
+{"type":"tool.execution_start","data":{"toolCallId":"call_2","toolName":"bash","arguments":{"command":"npm test","description":"Run tests"}},"id":"3f376921cb8938","timestamp":"2026-10-01T10:00:12.000Z"}
+{"type":"tool.execution_complete","data":{"toolCallId":"call_2","success":false,"error":{"message":"exit code 1"}},"id":"194c45e6553b58","timestamp":"2026-10-01T10:00:13.000Z"}
+{"type":"assistant.message","data":{"messageId":"m2","content":"The redirect target is hard-coded in src/router.ts.","toolRequests":[]},"id":"95da1167425d3","timestamp":"2026-10-01T10:01:00.000Z"}
+{"type":"assistant.turn_end","data":{"turnId":"0"},"id":"9a4ad82db9958","timestamp":"2026-10-01T10:01:01.000Z"}
+{"type":"user.message","data":{"content":"Change it to /dashboard","attachments":[]},"id":"726958fbf32cb8","timestamp":"2026-10-01T10:01:30.000Z"}
+{"type":"assistant.message","data":{"messageId":"m3","content":"","toolRequests":[{"toolCallId":"call_3","name":"edit","arguments":{"path":"src/router.ts","old_str":"/home","new_str":"/dashboard"},"type":"function"}]},"id":"21cff593d8029","timestamp":"2026-10-01T10:01:40.000Z"}
+{"type":"tool.execution_complete","data":{"toolCallId":"call_3","success":true,"result":{"content":"File edited."}},"id":"bbc0c1d0cc8ac","timestamp":"2026-10-01T10:01:41.000Z"}
+{"type":"assistant.message","data":{"messageId":"m4","content":"Done.","toolRequests":[]},"id":"6cbc7fed660d08","timestamp":"2026-10-01T10:02:00.000Z"}
+{"type":"some.future_event","data":{"x":1},"id":"0a43bfba7ed44","timestamp":"2026-10-01T10:02:00.000Z"}
