@@ -15,6 +15,21 @@ import {
 
 type ToolUsePart = Extract<TranscriptPart, { kind: 'tool_use' }>;
 
+/** A file link's path for display: file:///c%3A/repo/a.ts -> c:/repo/a.ts. */
+function linkPath(uri: string): string {
+  try {
+    const u = new URL(uri);
+    return u.protocol === 'file:' ? decodeURIComponent(u.pathname).replace(/^\/([A-Za-z]:)/, '$1') : uri;
+  } catch {
+    return uri;
+  }
+}
+
+/** A tool message as plain text: VS Code writes file links with empty text ("Read [](file:///…)"), shown as the path. */
+function plainMessage(text: string): string {
+  return text.replace(/\[([^\]]*)\]\(([^)\s]+)\)/g, (_, label: string, uri: string) => label || linkPath(uri));
+}
+
 const isObject = (v: unknown): v is Record<string, any> => !!v && typeof v === 'object' && !Array.isArray(v);
 
 /** The container at `path` inside `root`, creating objects/arrays along the way when missing. */
@@ -193,12 +208,15 @@ function toolPart(part: Record<string, any>): ToolUsePart {
     result = { text: truncate(text), isError: !!details.isError };
   } else if (details && (details.isError || typeof details.output === 'string')) {
     result = { text: truncate(md(details.output)), isError: !!details.isError };
+  } else if (part.isComplete === true) {
+    // VS Code keeps the output of only some tools; a completed call without it still succeeded.
+    result = { text: 'VS Code Chat did not save this tool call\'s output.', isError: false };
   }
   return {
     kind: 'tool_use',
     id: typeof part.toolCallId === 'string' ? part.toolCallId : undefined,
     name: String(part.toolId ?? 'tool'),
-    hint: message ? oneLine(message, 140) : toolHint(input),
+    hint: message ? oneLine(plainMessage(message), 140) : toolHint(input),
     input: truncate(typeof input === 'string' ? input : JSON.stringify(input ?? {}, null, 2)),
     result,
   };

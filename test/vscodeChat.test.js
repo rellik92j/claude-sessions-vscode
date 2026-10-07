@@ -127,6 +127,25 @@ test('transcript maps markdown, inline references, thinking and tool calls', () 
   assert.equal(lt[3].parts[0].text, '> Error: Request was canceled');
 });
 
+test('a tool call as VS Code saves it: file link as the hint, no output', () => {
+  const part = {
+    kind: 'toolInvocationSerialized',
+    invocationMessage: { value: 'Reading [](file:///c%3A/Users/me/repo/README.md)' },
+    pastTenseMessage: { value: 'Read [](file:///c%3A/Users/me/repo/README.md), lines 1 to 50 of [notes](file:///c%3A/n.md)' },
+    isComplete: true,
+    toolCallId: 'call_1',
+    toolId: 'copilot_readFile',
+  };
+  const t = parseChatTranscript(jsonl({ kind: 0, v: { requests: [{ message: { text: 'read it' }, response: [part], timestamp: 1 }] } }));
+  const tool = t[1].parts[0];
+  assert.equal(tool.hint, 'Read c:/Users/me/repo/README.md, lines 1 to 50 of notes');
+  assert.equal(tool.result.isError, false);
+  assert.match(tool.result.text, /did not save/);
+  // Still running when the window closed: no result.
+  const open = parseChatTranscript(jsonl({ kind: 0, v: { requests: [{ message: { text: 'x' }, response: [{ ...part, isComplete: false }] }] } }));
+  assert.equal(open[1].parts[0].result, undefined);
+});
+
 test('fuzz: truncated and garbage input never throws', () => {
   let seed = 11;
   const rand = (n) => ((seed = (seed * 1103515245 + 12345) % 2 ** 31), seed % n);
