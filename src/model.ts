@@ -97,9 +97,9 @@ export class SessionModel {
 
   /**
    * Sessions the sidebar shows. `workspaceOnly` overrides the sidebar's Workspace filter and `sources` its source
-   * chips (undefined: every source).
+   * chips (null: every source).
    */
-  visibleSessions(workspaceOnly = this.workspaceOnly, sources: ReadonlySet<SessionSource> | undefined = this.sources): SessionInfo[] {
+  visibleSessions(workspaceOnly = this.workspaceOnly, sources: ReadonlySet<SessionSource> | null = this.sources): SessionInfo[] {
     let list = this.sessions;
     if (sources) {
       list = list.filter((s) => sources.has(sourceOf(s)));
@@ -121,7 +121,7 @@ export class SessionModel {
   /** Sessions per source among those the sidebar's other filters let through, for the source chips. */
   sourceCounts(): Record<SessionSource, number> {
     const counts = Object.fromEntries(SOURCE_IDS.map((id) => [id, 0])) as Record<SessionSource, number>;
-    for (const s of this.visibleSessions(this.workspaceOnly, undefined)) {
+    for (const s of this.visibleSessions(this.workspaceOnly, null)) {
       counts[sourceOf(s)]++;
     }
     return counts;

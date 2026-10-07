@@ -5,7 +5,9 @@ import * as vscode from 'vscode';
 import { escapeHtml, formatDateTime, formatTokens, formatUsd } from './format';
 import { renderMarkdown } from './markdown';
 import { projectName, projectPath, SessionModel } from './model';
+import { parseCopilotTranscript } from './copilotCliParser';
 import { parseTranscript, SessionInfo, TranscriptEntry, TranscriptPart } from './sessionParser';
+import { parseChatTranscript } from './vscodeChatParser';
 import { isClaude, NO_FOLDER, sessionKey, SourceInfo, SOURCES, sourceOf } from './sources';
 import { UsageSummary } from './usage';
 
@@ -169,6 +171,10 @@ export class TranscriptPanels {
 /** The session's log as transcript entries, read with the parser for its source. */
 function readTranscript(session: SessionInfo, text: string): TranscriptEntry[] {
   switch (sourceOf(session)) {
+    case 'copilot-cli':
+      return parseCopilotTranscript(text);
+    case 'vscode-chat':
+      return parseChatTranscript(text);
     default:
       return parseTranscript(text);
   }

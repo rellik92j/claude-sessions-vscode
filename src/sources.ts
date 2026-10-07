@@ -1,9 +1,9 @@
 // The tools whose sessions the extension lists, and what differs between them.
 // No VS Code imports here so it can be unit-tested with plain Node.
 
-import { decodeProjectDir, SessionInfo } from './sessionParser';
+import { decodeProjectDir, SessionInfo, SessionSource } from './sessionParser';
 
-export type SessionSource = 'claude' | 'copilot-cli' | 'vscode-chat';
+export type { SessionSource };
 
 export const SOURCE_IDS: SessionSource[] = ['claude', 'copilot-cli', 'vscode-chat'];
 
@@ -55,11 +55,11 @@ export const SOURCES: Record<SessionSource, SourceInfo> = {
 /** Group label for sessions with no known folder (VS Code chats in an empty window, for example). */
 export const NO_FOLDER = 'No folder';
 
-/** A session's source; sessions without one are Claude Code's. */
-export const sourceOf = (s: SessionInfo): SessionSource => (s as { source?: SessionSource }).source ?? 'claude';
+/** A session's source; sessions built without one (by commands' callers, say) are Claude Code's. */
+export const sourceOf = (s: SessionInfo): SessionSource => s.source ?? 'claude';
 
 /** Identifies a session across sources, whose ids may collide. */
-export const sessionKey = (s: SessionInfo): string => (s as { key?: string }).key ?? `${sourceOf(s)}:${s.id}`;
+export const sessionKey = (s: SessionInfo): string => s.key ?? `${sourceOf(s)}:${s.id}`;
 
 export const isClaude = (s: SessionInfo) => sourceOf(s) === 'claude';
 

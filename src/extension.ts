@@ -8,7 +8,7 @@ import { buildHandoff, collectHandoffFacts } from './handoff';
 import { GroupBy, projectName, projectPath, SessionModel } from './model';
 import { isEmptyQuery, parseQuery } from './query';
 import { SessionInfo } from './sessionParser';
-import { defaultProjectsDir, SessionStore, sortTime } from './sessionStore';
+import { defaultCopilotDir, defaultProjectsDir, defaultVsCodeUserDirs, SessionStore, SourceRoots, sortTime } from './sessionStore';
 import { isClaude, sessionKey, SOURCES, sourceOf, toSources } from './sources';
 import { OverviewPanel } from './overviewPanel';
 import { SidebarView } from './sidebarView';
@@ -23,6 +23,15 @@ function config() {
 
 function projectsDir(): string {
   return config().get<string>('projectsDir')?.trim() || defaultProjectsDir();
+}
+
+/** Folders of GitHub Copilot CLI and VS Code Chat sessions, from the settings or the defaults. */
+function sourceRoots(): SourceRoots {
+  const vscodeUserDir = config().get<string>('vscodeUserDir')?.trim();
+  return {
+    copilotDir: config().get<string>('copilotDir')?.trim() || defaultCopilotDir(),
+    vscodeUserDirs: vscodeUserDir ? [vscodeUserDir] : defaultVsCodeUserDirs(),
+  };
 }
 
 const hasClaudeCode = () => !!vscode.extensions.getExtension(CLAUDE_CODE_EXTENSION);
@@ -79,7 +88,7 @@ function gitStatus(cwd: string): Promise<string | undefined> {
 }
 
 export function activate(context: vscode.ExtensionContext): void {
-  const store = new SessionStore(projectsDir());
+  const store = new SessionStore(projectsDir(), sourceRoots());
   const model = new SessionModel(store);
   const transcripts = new TranscriptPanels(context.extensionUri, hasClaudeCode, model);
   const overview = new OverviewPanel(context.extensionUri, model);
@@ -129,25 +138,39 @@ export function activate(context: vscode.ExtensionContext): void {
   applyConfig();
 
   // File watching: re-parse only the logs that changed, debounced because active sessions write constantly.
-  let watcher: vscode.FileSystemWatcher | undefined;
+  let watchers: vscode.FileSystemWatcher[] = [];
   let debounce: NodeJS.Timeout | undefined;
   const scheduleReload = () => {
     clearTimeout(debounce);
     debounce = setTimeout(() => model.reload(), 1500);
   };
+  // A new or deleted chat may be in a workspace folder the store hasn't seen holding chats.
+  const scheduleRescan = () => {
+    store.rescan();
+    scheduleReload();
+  };
   const watch = () => {
-    watcher?.dispose();
-    watcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(vscode.Uri.file(store.projectsDir), '*/*.jsonl'),
-    );
-    watcher.onDidCreate(scheduleReload);
-    watcher.onDidChange(scheduleReload);
-    watcher.onDidDelete(scheduleReload);
+    watchers.forEach((w) => w.dispose());
+    const patterns: [string, string][] = [[store.projectsDir, '*/*.jsonl']];
+    if (store.roots.copilotDir) {
+      const stateDir = path.join(store.roots.copilotDir, 'session-state');
+      patterns.push([stateDir, '*/{events.jsonl,workspace.yaml}'], [stateDir, '*.jsonl']);
+    }
+    for (const userDir of store.roots.vscodeUserDirs ?? []) {
+      patterns.push([userDir, 'workspaceStorage/*/chatSessions/*'], [userDir, 'globalStorage/emptyWindowChatSessions/*']);
+    }
+    watchers = patterns.map(([base, glob]) => {
+      const w = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(base), glob));
+      w.onDidCreate(scheduleRescan);
+      w.onDidChange(scheduleReload);
+      w.onDidDelete(scheduleRescan);
+      return w;
+    });
   };
   watch();
 
   context.subscriptions.push(
-    { dispose: () => watcher?.dispose() },
+    { dispose: () => watchers.forEach((w) => w.dispose()) },
     { dispose: () => clearTimeout(debounce) },
     vscode.extensions.onDidChange(() => {
       updateClaudeCodeContext();
@@ -162,8 +185,13 @@ export function activate(context: vscode.ExtensionContext): void {
       if (e.affectsConfiguration(`${CONFIG}.sources`)) {
         applySources();
       }
-      if (e.affectsConfiguration(`${CONFIG}.projectsDir`)) {
+      if (
+        e.affectsConfiguration(`${CONFIG}.projectsDir`) ||
+        e.affectsConfiguration(`${CONFIG}.copilotDir`) ||
+        e.affectsConfiguration(`${CONFIG}.vscodeUserDir`)
+      ) {
         store.setProjectsDir(projectsDir());
+        store.setRoots(sourceRoots());
         watch();
         model.reload();
       } else {
@@ -328,7 +356,10 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('claudeSessions.refresh', () => model.reload()),
+    vscode.commands.registerCommand('claudeSessions.refresh', () => {
+      store.rescan();
+      return model.reload();
+    }),
     vscode.commands.registerCommand('claudeSessions.focusSearch', () => sidebar.focusSearch()),
     vscode.commands.registerCommand('claudeSessions.openOverview', () => overview.show()),
     vscode.commands.registerCommand('claudeSessions.search', () => searchSessions(model)),

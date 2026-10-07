@@ -30,7 +30,11 @@ function fakeVscode(state) {
   return {
     EventEmitter,
     Uri: { file: uri, joinPath: (b, ...p) => uri(path.join(b.fsPath, ...p)), parse: uri },
-    ThemeIcon: class {},
+    ThemeIcon: class {
+      constructor(id) {
+        this.id = id;
+      }
+    },
     RelativePattern: class {},
     ViewColumn: { Active: -1, Beside: -2 },
     TerminalLocation: { Panel: 1 },
@@ -39,7 +43,11 @@ function fakeVscode(state) {
     env: { clipboard: { writeText: async () => {} }, openExternal: async () => {} },
     workspace: {
       workspaceFolders: [],
-      getConfiguration: () => ({ get: (k, d) => (k === 'projectsDir' ? state.projectsDir : d), update: async () => {} }),
+      // Every source reads from temp folders (state.config), never from this machine's real sessions.
+      getConfiguration: () => ({
+        get: (k, d) => (k === 'projectsDir' ? state.projectsDir : k in (state.config ?? {}) ? state.config[k] : d),
+        update: async () => {},
+      }),
       createFileSystemWatcher: () => ({ onDidCreate() {}, onDidChange() {}, onDidDelete() {}, dispose() {} }),
       onDidChangeConfiguration: () => disposable,
       onDidChangeWorkspaceFolders: () => disposable,
@@ -57,6 +65,7 @@ function fakeVscode(state) {
       createTerminal: (options) => (state.terminals.push(options), { show() {}, sendText(t) { options.sent = t; } }),
       showErrorMessage: (m) => state.errors.push(m),
       showWarningMessage: async () => undefined,
+      showInformationMessage: async (m) => (state.infos?.push(m), undefined),
       setStatusBarMessage() {},
       // Tests answer quick picks by setting state.pick to a function of the items and options.
       showQuickPick: async (items, options) => state.pick?.(items, options),
@@ -99,7 +108,17 @@ test('bundled extension activates, fills the sidebar, and renders a transcript',
     { type: 'ai-title', aiTitle: 'Dark mode toggle' },
   ]);
 
-  const state = { projectsDir, providers: {}, commands: {}, panels: [], panelPosts: [], errors: [], terminals: [] };
+  const noSources = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-sessions-none-'));
+  const state = {
+    projectsDir,
+    config: { copilotDir: noSources, vscodeUserDir: noSources },
+    providers: {},
+    commands: {},
+    panels: [],
+    panelPosts: [],
+    errors: [],
+    terminals: [],
+  };
   const vscode = fakeVscode(state);
   const originalLoad = Module._load;
   Module._load = function (request, ...rest) {
@@ -158,12 +177,13 @@ test('bundled extension activates, fills the sidebar, and renders a transcript',
     };
     let results = search('"x = 1" toggle');
     assert.equal(results.query, '"x = 1" toggle');
-    assert.deepEqual(results.ids, ['aaaa-1111']);
+    // Results are session keys, which stay unique across sources.
+    assert.deepEqual(results.ids, ['claude:aaaa-1111']);
     assert.deepEqual(results.highlight, ['x = 1', 'toggle']);
-    assert.match(results.snippets['aaaa-1111'], /x = 1/);
+    assert.match(results.snippets['claude:aaaa-1111'], /x = 1/);
     // Matched on the card alone: no snippet.
     results = search('dark OR nothing');
-    assert.deepEqual(results.ids, ['aaaa-1111']);
+    assert.deepEqual(results.ids, ['claude:aaaa-1111']);
     assert.deepEqual(results.snippets, {});
     assert.deepEqual(search('"toggle dark"').ids, []);
     assert.deepEqual(search('toggle -const').ids, []);
@@ -289,5 +309,138 @@ test('bundled extension activates, fills the sidebar, and renders a transcript',
   } finally {
     Module._load = originalLoad;
     fs.rmSync(projectsDir, { recursive: true, force: true });
+    fs.rmSync(noSources, { recursive: true, force: true });
+  }
+});
+
+/** Activates the bundle against fake VS Code with the given state; returns the sidebar's posts and message handler. */
+async function activateWithSidebar(state) {
+  const extDir = process.env.EXT_DIR || path.join(__dirname, '..');
+  const bundle = path.join(extDir, 'dist', 'extension.js');
+  const vscode = fakeVscode(state);
+  const originalLoad = Module._load;
+  Module._load = function (request, ...rest) {
+    return request === 'vscode' ? vscode : originalLoad.call(this, request, ...rest);
+  };
+  try {
+    delete require.cache[bundle];
+    require(bundle).activate({ subscriptions: [], extensionUri: vscode.Uri.file(extDir) });
+  } finally {
+    Module._load = originalLoad;
+  }
+  const posted = [];
+  let handler;
+  state.providers['claudeSessions.list'].resolveWebviewView({
+    visible: true,
+    webview: { ...vscode._webview(posted), onDidReceiveMessage: (f) => ((handler = f), { dispose() {} }) },
+    onDidChangeVisibility: () => ({ dispose() {} }),
+    onDidDispose: () => ({ dispose() {} }),
+    show() {},
+  });
+  handler({ type: 'ready' });
+  await new Promise((r) => setTimeout(r, 300));
+  return { vscode, posted, send: handler, last: (type) => posted.filter((m) => m.type === type).pop() };
+}
+
+test('Copilot CLI and VS Code Chat sessions: source chips, filters, search, transcripts and actions', async () => {
+  const fixtures = path.join(__dirname, 'fixtures');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-sessions-sources-'));
+  const projectsDir = path.join(root, 'claude');
+  const copilotDir = path.join(root, 'copilot');
+  const userDir = path.join(root, 'Code', 'User');
+  try {
+    // One Claude session whose id is also a Copilot session's id, to check keys keep them apart.
+    const shared = 'b380c8e3-1729-4e04-a560-1517aa38fb97';
+    writeSession(path.join(projectsDir, 'C--repo'), shared, [
+      { type: 'user', message: { content: 'Fix the login race' }, cwd: 'C:\\repo', timestamp: new Date().toISOString() },
+    ]);
+    fs.cpSync(path.join(fixtures, 'copilot-cli'), path.join(copilotDir, 'session-state'), { recursive: true });
+    const chats = path.join(userDir, 'workspaceStorage', 'abc123', 'chatSessions');
+    fs.mkdirSync(chats, { recursive: true });
+    fs.copyFileSync(path.join(fixtures, 'vscode-chat', '63869299-99f3-491c-89c4-bb361f7147f7.jsonl'), path.join(chats, '63869299-99f3-491c-89c4-bb361f7147f7.jsonl'));
+    fs.writeFileSync(path.join(userDir, 'workspaceStorage', 'abc123', 'workspace.json'), JSON.stringify({ folder: 'file:///c%3A/work/site' }));
+    // An empty chat in an empty window: hidden like any empty session.
+    const empty = path.join(userDir, 'globalStorage', 'emptyWindowChatSessions');
+    fs.mkdirSync(empty, { recursive: true });
+    fs.writeFileSync(path.join(empty, 'e0.jsonl'), JSON.stringify({ kind: 0, v: { version: 3, sessionId: 'e0', customTitle: 'Untouched', requests: [] } }) + '\n');
+
+    const state = {
+      projectsDir,
+      config: { copilotDir, vscodeUserDir: userDir },
+      providers: {},
+      commands: {},
+      panels: [],
+      panelPosts: [],
+      errors: [],
+      terminals: [],
+      infos: [],
+    };
+    const { posted, send, last } = await activateWithSidebar(state);
+    let msg = last('state');
+    const cards = msg.groups.flatMap((g) => g.sessions);
+    const bySource = (src) => cards.filter((c) => c.source === src);
+    assert.equal(bySource('claude').length, 1);
+    assert.equal(bySource('copilot-cli').length, 2, 'the real capture and the synthetic one with tool calls');
+    assert.equal(bySource('vscode-chat').length, 1, 'the empty chat is hidden');
+    assert.equal(new Set(cards.map((c) => c.id)).size, cards.length, 'keys are unique across sources');
+    assert.ok(cards.some((c) => c.id === `claude:${shared}`) && cards.some((c) => c.id === `copilot-cli:${shared}`));
+    assert.deepEqual(msg.sources.map((x) => [x.id, x.count, x.on]), [['claude', 1, true], ['copilot-cli', 2, true], ['vscode-chat', 1, true]]);
+    const chat = bySource('vscode-chat')[0];
+    assert.equal(chat.title, 'Chat session overview');
+    assert.match(chat.projectPath, /work[\\/]site$/);
+
+    // Chips filter for this window only.
+    send({ type: 'setSources', value: ['copilot-cli'] });
+    msg = last('state');
+    assert.equal(msg.total, 2);
+    assert.deepEqual(msg.sources.map((x) => x.on), [false, true, false]);
+    assert.deepEqual(msg.sources.map((x) => x.count), [1, 2, 1], 'counts ignore the source filter');
+    send({ type: 'setSources', value: ['nonsense'] });
+    assert.equal(last('state').total, 0);
+    assert.equal(last('state').hiddenBySource, true);
+    send({ type: 'setSources', value: null });
+    assert.equal(last('state').total, 4, 'anything but a list means every source');
+
+    // source: narrows the search and is never highlighted.
+    send({ type: 'search', query: 'source:copilot' });
+    let results = last('searchResults');
+    assert.deepEqual(results.ids.sort(), bySource('copilot-cli').map((c) => c.id).sort());
+    assert.deepEqual(results.highlight, []);
+    send({ type: 'search', query: '-source:claude -source:cli' });
+    assert.deepEqual(last('searchResults').ids, [chat.id]);
+    send({ type: 'search', query: 'login source:chat' });
+    assert.deepEqual(last('searchResults').ids, []);
+
+    // Transcripts render with each source's parser and branding.
+    await state.commands['claudeSessions.openTranscript']({ sessionKey: chat.id });
+    let html = state.panels[0].webview.html;
+    assert.match(html, /source-avatar/);
+    assert.match(html, /<strong>Copilot<\/strong>/);
+    assert.match(html, /<span>Open in Chat<\/span>/);
+    assert.doesNotMatch(html, /data-cmd="continueInNewSession"/);
+    await state.commands['claudeSessions.openTranscript']({ sessionKey: `copilot-cli:${shared}` });
+    html = state.panels[0].webview.html;
+    assert.match(html, /GitHub Copilot CLI/);
+    assert.match(html, /Create Chat Session/);
+
+    // Claude-only commands refuse other sources; resuming Copilot runs its CLI in the session's folder.
+    const copilotSession = { sessionKey: `copilot-cli:${shared}` };
+    await state.commands['claudeSessions.continueInNewSession'](copilotSession);
+    await state.commands['claudeSessions.openInClaudeCode'](copilotSession);
+    assert.equal(state.terminals.length, 0);
+    assert.equal(state.infos.length, 2);
+    assert.match(state.infos[0], /only for Claude Code sessions/);
+    await state.commands['claudeSessions.resume'](copilotSession);
+    const t = state.terminals.pop();
+    assert.equal(t.sent, `copilot --resume ${shared}`);
+    assert.match(t.name, /^GitHub Copilot CLI · /);
+    await state.commands['claudeSessions.resume']({ sessionKey: `claude:${shared}` });
+    assert.equal(state.terminals.pop().sent, `claude --resume ${shared}`);
+    // A chat from another workspace offers that folder's window instead of opening here.
+    await state.commands['claudeSessions.resume']({ sessionKey: chat.id });
+    assert.match(state.infos.pop(), /VS Code opens a chat only in the window of its own folder/);
+    assert.deepEqual(state.errors, []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });

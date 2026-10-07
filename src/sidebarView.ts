@@ -201,7 +201,7 @@ export class SidebarView implements vscode.WebviewViewProvider {
         this.setOption('currentWorkspaceOnly', !!msg.value);
         break;
       case 'refresh':
-        this.model.reload();
+        vscode.commands.executeCommand('claudeSessions.refresh');
         break;
       case 'search': {
         // Searching happens in the extension host (transcript text never goes to the webview); it gets back the

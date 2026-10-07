@@ -30,6 +30,7 @@ Press `/` to search. The search covers the card details and the full conversatio
 | `"race condition"` | the exact phrase |
 | `-flaky` or `-"some phrase"` | sessions that *don't* contain it |
 | `redis OR postgres` | sessions containing either word |
+| `source:copilot` or `-source:chat` | sessions from one tool, or all but one (`claude`, `copilot`, `chat`) |
 
 ### Read a session as a chat
 
@@ -81,6 +82,16 @@ The overview starts with the projects in your current workspace. Use the **Proje
 
 Cost is counted on the day each request was made, so a session that ran over several days is split across them.
 
+### GitHub Copilot CLI and VS Code Chat sessions too
+
+The sidebar also lists your [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli) sessions and your VS Code Chat (GitHub Copilot Chat) conversations, next to your Claude Code sessions. Each card has a badge naming its tool. You can search all of them and read any of them as a transcript.
+
+- **Source chips** under the search box: **All**, then one chip per tool with its session count. Click a chip to show or hide that tool's sessions, or Alt+click it to show only that tool. The chips appear once more than one tool has sessions. They change the current window only. The `claudeSessions.sources` setting chooses what a new window starts with.
+- **Resume** runs `copilot --resume <id>` for a Copilot CLI session. For a VS Code chat, the button reads **Open in Chat**. It opens the conversation in this window if the chat belongs to this window's folder. If it doesn't, you can open that folder in a new window, because VS Code shows a chat only in the window of its own folder.
+- Continue in New Session, Open in Claude Code Chat, and the usage and cost figures are for Claude Code sessions only. Copilot logs record no token usage, so the overview labels its cost **Claude only** when other tools are shown. The overview has its own source chips.
+
+Sessions are read from `~/.copilot/session-state` (or `$COPILOT_HOME`), and from the `workspaceStorage` folders of VS Code and VS Code Insiders. Chats from remote, WSL or SSH windows, and from other editors built on VS Code, are not included.
+
 ### Pick up where you left off
 
 ![Resuming a session in a Claude Code terminal beside the editor](docs/images/resume.png)
@@ -104,7 +115,7 @@ Claude Sessions isn't on the VS Code Marketplace yet. To install it:
    Or, from a terminal:
 
    ```sh
-   code --install-extension claude-sessions-0.2.8.vsix
+   code --install-extension claude-sessions-0.3.0.vsix
    ```
 
 3. Click the **Claude Sessions** icon in the Activity Bar.
@@ -113,7 +124,7 @@ To update, install the newer `.vsix` the same way.
 
 ## Privacy
 
-Claude Sessions only reads the session logs that Claude Code already keeps on your machine, in `~/.claude/projects` (or `$CLAUDE_CONFIG_DIR/projects` if you set it). It sends nothing over the network, and it never changes or deletes your logs.
+Claude Sessions only reads the session logs that are already on your machine: Claude Code's in `~/.claude/projects` (or `$CLAUDE_CONFIG_DIR/projects` if you set it), GitHub Copilot CLI's in `~/.copilot/session-state`, and VS Code Chat's in VS Code's `workspaceStorage` folder. It sends nothing over the network, and it never changes or deletes your logs.
 
 ## Keyboard shortcuts
 
@@ -135,6 +146,10 @@ The **Claude Sessions: Search Sessions…** command in the Command Palette searc
 | Setting | Default | Description |
 | --- | --- | --- |
 | `claudeSessions.projectsDir` | `""` | Folder with session logs. Empty means `$CLAUDE_CONFIG_DIR/projects` or `~/.claude/projects`. |
+| `claudeSessions.sources` | all three | Tools whose sessions a new window shows: `claude`, `copilot-cli`, `vscode-chat`. |
+| `claudeSessions.copilotDir` | `""` | GitHub Copilot CLI's folder. Empty means `$COPILOT_HOME` or `~/.copilot`. |
+| `claudeSessions.vscodeUserDir` | `""` | VS Code's user data folder, for chats. Empty means the default folders of VS Code and VS Code Insiders. |
+| `claudeSessions.copilotCommand` | `copilot` | Command used to launch GitHub Copilot CLI when resuming. |
 | `claudeSessions.groupBy` | `project` | Group sessions by `project` or `date`. |
 | `claudeSessions.currentWorkspaceOnly` | `false` | Only show sessions from the open workspace folders. |
 | `claudeSessions.hideEmptySessions` | `true` | Hide sessions with no prompts or replies. |
