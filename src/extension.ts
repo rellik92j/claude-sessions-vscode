@@ -23,6 +23,10 @@ function config() {
   return vscode.workspace.getConfiguration(CONFIG);
 }
 
+function isUri(x: unknown): x is vscode.Uri {
+  return !!x && typeof (x as vscode.Uri).fsPath === 'string';
+}
+
 function projectsDir(): string {
   return config().get<string>('projectsDir')?.trim() || defaultProjectsDir();
 }
@@ -422,6 +426,16 @@ export function activate(context: vscode.ExtensionContext): void {
       return model.reload();
     }),
     vscode.commands.registerCommand('claudeSessions.focusSearch', () => sidebar.focusSearch()),
+    vscode.commands.registerCommand('claudeSessions.searchForFile', (uri?: unknown) => {
+      // From the Explorer or a tab's context menu the file comes as an argument; from the palette, the active editor.
+      const target = isUri(uri) ? uri : vscode.window.activeTextEditor?.document.uri;
+      if (!target) {
+        return;
+      }
+      // The file name alone: transcripts mention a file by absolute path in tool calls and by bare name in prose.
+      const name = path.basename(target.fsPath);
+      return sidebar.searchFor(/\s/.test(name) ? `"${name}"` : name);
+    }),
     vscode.commands.registerCommand('claudeSessions.openOverview', () => overview.show()),
     vscode.commands.registerCommand('claudeSessions.search', () => searchSessions(model)),
     vscode.commands.registerCommand('claudeSessions.groupByProject', () => setConfig('groupBy', 'project')),

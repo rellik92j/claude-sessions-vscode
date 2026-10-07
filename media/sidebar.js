@@ -520,6 +520,13 @@
         search = { query: msg.query, ids: new Set(msg.ids || []), snippets: msg.snippets || {}, highlight: msg.highlight || [] };
         render();
       }
+    } else if (msg?.type === 'setQuery') {
+      clearTimeout(searchTimer);
+      $q.value = query = msg.query || '';
+      save();
+      requestSearch();
+      render();
+      $q.focus();
     } else if (msg?.type === 'focusSearch') {
       $q.focus();
       $q.select();

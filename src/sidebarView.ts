@@ -92,6 +92,7 @@ export class SidebarView implements vscode.WebviewViewProvider {
   static readonly viewId = 'claudeSessions.list';
   private view: vscode.WebviewView | undefined;
   private ready = false;
+  private pendingQuery: string | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -128,6 +129,20 @@ export class SidebarView implements vscode.WebviewViewProvider {
   focusSearch(): void {
     this.view?.show(false);
     this.view?.webview.postMessage({ type: 'focusSearch' });
+  }
+
+  /** Shows the sidebar with `query` in its search box; if the view is not loaded yet, it gets the query once ready. */
+  async searchFor(query: string): Promise<void> {
+    this.pendingQuery = query;
+    await vscode.commands.executeCommand(`${SidebarView.viewId}.focus`);
+    this.postPendingQuery();
+  }
+
+  private postPendingQuery(): void {
+    if (this.view && this.ready && this.pendingQuery !== undefined) {
+      this.view.webview.postMessage({ type: 'setQuery', query: this.pendingQuery });
+      this.pendingQuery = undefined;
+    }
   }
 
   postState(): void {
@@ -173,6 +188,7 @@ export class SidebarView implements vscode.WebviewViewProvider {
       case 'ready':
         this.ready = true;
         this.postState();
+        this.postPendingQuery();
         break;
       case 'run': {
         const command = PAGE_COMMANDS[msg.command];
