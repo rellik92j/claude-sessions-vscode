@@ -1,0 +1,8 @@
+id: 3f2a9c1e-0b7d-4e55-9a41-6c2d8e1f7a10
+cwd: C:\Users\me\repo
+git_root: C:\Users\me\repo
+repository: me/repo
+branch: feature/login
+summary: "Fix the login redirect"
+created_at: 2026-10-01T10:00:00.000Z
+updated_at: 2026-10-01T10:02:00.000Z
