@@ -126,12 +126,12 @@ Claude Sessions isn't on the VS Code Marketplace yet. To install it:
    Or, from a terminal:
 
    ```sh
-   code --install-extension claude-sessions-0.3.0.vsix
+   code --install-extension claude-sessions-0.3.1.vsix
    ```
 
 3. Click the **Claude Sessions** icon in the Activity Bar.
 
-To update, install the newer `.vsix` the same way.
+To update, install the newer `.vsix` the same way. To reinstall a build with the same version number, add `--force` to the terminal command.
 
 ## Privacy
 
@@ -153,7 +153,7 @@ In the sidebar:
 
 In a transcript: F3 / Shift+F3 step through search matches, and Esc clears them.
 
-The **Claude Sessions: Search Sessions…** command in the Command Palette searches transcripts too, and **Claude Sessions: Open Overview** opens the overview.
+The **Claude Sessions: Search Sessions…** command in the Command Palette searches transcripts too, **Claude Sessions: Search Claude Sessions for This File** searches for the file in the active editor, and **Claude Sessions: Open Overview** opens the overview.
 
 ## Settings
 
