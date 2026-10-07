@@ -240,6 +240,10 @@ test('bundled extension activates, fills the sidebar, and renders a transcript',
     await state.panels[0].onMessage({ command: 'continueInNewSessionWithModel' });
     await new Promise((r) => setTimeout(r, 300));
     assert.equal(state.terminals.length, 0);
+    // Continuing a continued session doesn't stack the prefix.
+    await state.commands['claudeSessions.continueInNewSession']({ ...sessionA, title: 'Continued: Continued: Session aaaa' });
+    await new Promise((r) => setTimeout(r, 300));
+    assert.deepEqual(state.terminals.pop().shellArgs.slice(0, 2), ['--name', 'Continued: Session aaaa']);
 
     // Overview: one editor tab, filled when its page is ready, for the range the page asks for.
     await state.commands['claudeSessions.openOverview']();
