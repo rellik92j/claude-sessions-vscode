@@ -2,7 +2,7 @@
   "name": "claude-sessions",
   "displayName": "Claude Sessions",
   "description": "Browse, search, read and resume your Claude Code, GitHub Copilot CLI and VS Code Chat sessions from the VS Code sidebar.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publisher": "local",
   "license": "MIT",
   "repository": {
