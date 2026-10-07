@@ -2,14 +2,17 @@ import { randomBytes } from 'crypto';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { hueFor } from './format';
-import { GroupBy, projectPath, SessionModel } from './model';
+import { GroupBy, projectName, projectPath, SessionModel } from './model';
 import { parseQuery } from './query';
 import { SessionInfo } from './sessionParser';
 import { sortTime } from './sessionStore';
+import { sessionKey, SessionSource, SOURCE_IDS, SOURCES, sourceOf, toSources } from './sources';
 
 /** What a session card needs; kept small because the whole list is posted to the webview on every change. */
 export interface CardData {
+  /** The session key (unique across sources). */
   id: string;
+  source: SessionSource;
   title: string;
   agent?: string;
   excerpt?: string;
@@ -44,11 +47,12 @@ export function toCard(s: SessionInfo): CardData {
   const titleStem = flat(title).replace(/…$/, '');
   const excerpt = [s.lastPrompt, s.firstPrompt].find((p) => p && !flat(p).startsWith(titleStem));
   return {
-    id: s.id,
+    id: sessionKey(s),
+    source: sourceOf(s),
     title,
     agent: s.agentName,
     excerpt: excerpt ? flat(excerpt).slice(0, 240) : undefined,
-    project: path.basename(p) || p,
+    project: projectName(p),
     projectPath: p,
     hue: hueFor(p),
     branch: s.gitBranch,
@@ -141,13 +145,24 @@ export class SidebarView implements vscode.WebviewViewProvider {
     }));
     const total = groups.reduce((n, g) => n + g.sessions.length, 0);
     this.view.description = total ? String(total) : undefined;
+    // A chip per source that has sessions at all; none while there is only one, as there is nothing to choose.
+    const present = this.model.presentSources();
+    const counts = this.model.sourceCounts();
+    const sources =
+      present.length > 1
+        ? present.map((id) => ({ id, label: SOURCES[id].short, title: SOURCES[id].label, icon: SOURCES[id].icon, count: counts[id], on: this.model.sources.has(id) }))
+        : [];
+    const hiddenBySource = total === 0 && present.some((id) => !this.model.sources.has(id) && counts[id] > 0);
     this.view.webview.postMessage({
       type: 'state',
       loaded: this.model.isLoaded,
       groupBy: this.model.groupBy,
       workspaceOnly: this.model.workspaceOnly,
       hasClaudeCode: this.hasClaudeCode(),
-      hiddenByFilter: this.model.workspaceOnly && total === 0 && this.model.allSessions.length > 0,
+      hiddenByFilter: !hiddenBySource && this.model.workspaceOnly && total === 0 && this.model.allSessions.length > 0,
+      hiddenBySource,
+      sources,
+      sourceInfo: Object.fromEntries(SOURCE_IDS.map((id) => [id, SOURCES[id]])),
       total,
       groups,
     });
@@ -177,11 +192,16 @@ export class SidebarView implements vscode.WebviewViewProvider {
           this.setOption('groupBy', msg.value as GroupBy);
         }
         break;
+      case 'setSources':
+        // Session state only: the sources setting stays the default for the next window.
+        this.model.sources = new Set(toSources(msg.value));
+        this.model.refreshView();
+        break;
       case 'setWorkspaceOnly':
         this.setOption('currentWorkspaceOnly', !!msg.value);
         break;
       case 'refresh':
-        this.model.reload();
+        vscode.commands.executeCommand('claudeSessions.refresh');
         break;
       case 'search': {
         // Searching happens in the extension host (transcript text never goes to the webview); it gets back the
@@ -191,9 +211,10 @@ export class SidebarView implements vscode.WebviewViewProvider {
         const snippets: Record<string, string> = {};
         const ids: string[] = [];
         for (const hit of this.model.search(q, (s) => cardText(toCard(s)))) {
-          ids.push(hit.session.id);
+          const key = sessionKey(hit.session);
+          ids.push(key);
           if (hit.snippet) {
-            snippets[hit.session.id] = hit.snippet;
+            snippets[key] = hit.snippet;
           }
         }
         this.view?.webview.postMessage({ type: 'searchResults', query, ids, snippets, highlight: q.highlight });

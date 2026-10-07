@@ -4,8 +4,10 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { escapeHtml, formatDateTime, formatTokens, formatUsd } from './format';
 import { renderMarkdown } from './markdown';
-import { projectPath, SessionModel } from './model';
-import { parseTranscript, SessionInfo, TranscriptEntry, TranscriptPart } from './sessionParser';
+import { projectName, projectPath, SessionModel } from './model';
+import { SessionInfo, TranscriptEntry, TranscriptPart } from './sessionParser';
+import { parseTranscriptFor } from './transcripts';
+import { isClaude, NO_FOLDER, sessionKey, SourceInfo, SOURCES, sourceOf } from './sources';
 import { UsageSummary } from './usage';
 
 type ToolPart = Extract<TranscriptPart, { kind: 'tool_use' }>;
@@ -25,7 +27,7 @@ interface TranscriptTab {
  * already has a regular tab is just focused.
  */
 export class TranscriptPanels {
-  /** Regular (kept) tabs by session id. */
+  /** Regular (kept) tabs by session key. */
   private readonly pinned = new Map<string, TranscriptTab>();
   private preview: TranscriptTab | undefined;
 
@@ -41,8 +43,9 @@ export class TranscriptPanels {
    */
   async open(session: SessionInfo, highlight: string[] = [], keepOpen = false): Promise<void> {
     const usePreview = !keepOpen && vscode.workspace.getConfiguration('claudeSessions').get<boolean>('reuseTranscriptTab', true);
-    let tab = this.pinned.get(session.id);
-    if (!tab && this.preview?.session.id === session.id) {
+    const key = sessionKey(session);
+    let tab = this.pinned.get(key);
+    if (!tab && this.preview && sessionKey(this.preview.session) === key) {
       tab = this.preview;
       if (!usePreview) {
         this.promote(tab);
@@ -69,21 +72,17 @@ export class TranscriptPanels {
       retainContextWhenHidden: true,
       localResourceRoots: [this.codiconsUri, this.mediaUri],
     });
-    const claudeCode = vscode.extensions.getExtension('anthropic.claude-code');
-    panel.iconPath = claudeCode
-      ? vscode.Uri.joinPath(claudeCode.extensionUri, 'resources', 'claude-logo.svg')
-      : new vscode.ThemeIcon('comment-discussion');
     const tab: TranscriptTab = { panel, session, highlight, preview };
     if (preview) {
       this.preview = tab;
     } else {
-      this.pinned.set(session.id, tab);
+      this.pinned.set(sessionKey(session), tab);
     }
     panel.onDidDispose(() => {
       if (this.preview === tab) {
         this.preview = undefined;
-      } else if (this.pinned.get(tab.session.id) === tab) {
-        this.pinned.delete(tab.session.id);
+      } else if (this.pinned.get(sessionKey(tab.session)) === tab) {
+        this.pinned.delete(sessionKey(tab.session));
       }
     });
     panel.webview.onDidReceiveMessage(async (msg) => {
@@ -106,7 +105,7 @@ export class TranscriptPanels {
         case 'refresh':
           // Re-read the log first so the stats are current too.
           await this.model.reload();
-          tab.session = this.model.find(tab.session.id) ?? tab.session;
+          tab.session = this.model.find(sessionKey(tab.session)) ?? tab.session;
           this.render(tab);
           break;
         case 'keepOpen':
@@ -126,7 +125,7 @@ export class TranscriptPanels {
       this.preview = undefined;
     }
     tab.preview = false;
-    this.pinned.set(tab.session.id, tab);
+    this.pinned.set(sessionKey(tab.session), tab);
   }
 
   private get codiconsUri() {
@@ -139,9 +138,15 @@ export class TranscriptPanels {
 
   private async render(tab: TranscriptTab): Promise<void> {
     const { panel, session } = tab;
+    // The preview tab switches sessions, and with them sources.
+    const claudeCode = vscode.extensions.getExtension('anthropic.claude-code');
+    panel.iconPath =
+      isClaude(session) && claudeCode
+        ? vscode.Uri.joinPath(claudeCode.extensionUri, 'resources', 'claude-logo.svg')
+        : new vscode.ThemeIcon(isClaude(session) ? 'comment-discussion' : SOURCES[sourceOf(session)].icon);
     let entries: TranscriptEntry[];
     try {
-      entries = parseTranscript(await fs.readFile(session.filePath, 'utf8'));
+      entries = parseTranscriptFor(session, await fs.readFile(session.filePath, 'utf8'));
     } catch (err) {
       vscode.window.showErrorMessage(`Could not read session log: ${(err as Error).message}`);
       return;
@@ -195,7 +200,31 @@ const TOOL_ICONS: Record<string, string> = {
   skill: 'sparkle',
   sendmessage: 'send',
   artifact: 'preview',
+  // GitHub Copilot CLI and VS Code Chat.
+  view: 'file',
+  create: 'new-file',
+  str_replace: 'edit',
+  str_replace_editor: 'edit',
+  apply_patch: 'edit',
+  shell: 'terminal',
+  run_in_terminal: 'terminal',
+  report_intent: 'lightbulb',
+  update_todo: 'checklist',
+  fetch: 'globe',
+  web_fetch: 'globe',
+  think: 'lightbulb',
 };
+
+/** VS Code Chat tool ids carry a prefix ("copilot_readFile"); the rest names the action. */
+const TOOL_WORDS: [RegExp, string][] = [
+  [/read|view|open/i, 'file'],
+  [/create|new/i, 'new-file'],
+  [/edit|replace|insert|patch/i, 'edit'],
+  [/terminal|run|exec|shell/i, 'terminal'],
+  [/search|find|grep/i, 'search'],
+  [/fetch|web/i, 'globe'],
+  [/todo/i, 'checklist'],
+];
 
 function toolIcon(name: string): string {
   const key = name.toLowerCase();
@@ -204,6 +233,9 @@ function toolIcon(name: string): string {
   }
   if (key.startsWith('mcp__')) {
     return 'plug';
+  }
+  if (key.startsWith('copilot_') || key.startsWith('vscode_')) {
+    return TOOL_WORDS.find(([re]) => re.test(key))?.[1] ?? 'tools';
   }
   return 'tools';
 }
@@ -313,7 +345,12 @@ function initials(name: string): string {
   return (words.length > 1 ? words[0][0] + words[1][0] : name.slice(0, 2)).toUpperCase();
 }
 
-function renderEntry(e: TranscriptEntry, showThinking: boolean): string {
+/** The assistant's avatar: Claude's mark, or the source's codicon. */
+function assistantMark(source: SourceInfo): string {
+  return source.id === 'claude' ? CLAUDE_MARK : `<i class="codicon codicon-${source.icon}"></i>`;
+}
+
+function renderEntry(e: TranscriptEntry, showThinking: boolean, source: SourceInfo): string {
   if (e.role === 'system') {
     const text = e.parts.map((p) => ('text' in p ? p.text : '')).join(' ');
     return `<div class="divider system"><span><i class="codicon codicon-fold"></i>${escapeHtml(text)}</span></div>`;
@@ -340,10 +377,10 @@ function renderEntry(e: TranscriptEntry, showThinking: boolean): string {
   if (!body) {
     return '';
   }
-  const role = e.role === 'tool' ? 'Tools' : 'Claude';
+  const role = e.role === 'tool' ? 'Tools' : source.assistant;
   return `
     <div class="msg assistant">
-      <div class="avatar claude-avatar">${CLAUDE_MARK}</div>
+      <div class="avatar ${source.id === 'claude' ? 'claude-avatar' : 'source-avatar'}">${assistantMark(source)}</div>
       <div class="msg-main">
         <div class="msg-meta"><strong>${role}</strong>${time(e.timestamp)}</div>
         ${body}
@@ -460,8 +497,11 @@ function renderStatsStrip(session: SessionInfo, toolCount: number): string {
 export function buildHtml(session: SessionInfo, entries: TranscriptEntry[], o: HtmlOptions): string {
   const nonce = randomBytes(16).toString('base64');
   const proj = projectPath(session);
+  const source = SOURCES[sourceOf(session)];
+  const claude = source.id === 'claude';
   const chips = [
-    `<span class="chip" title="${escapeHtml(proj)}"><i class="codicon codicon-folder"></i>${escapeHtml(path.basename(proj) || proj)}</span>`,
+    claude ? '' : `<span class="chip"><i class="codicon codicon-${source.icon}"></i>${escapeHtml(source.label)}</span>`,
+    `<span class="chip" title="${escapeHtml(proj || NO_FOLDER)}"><i class="codicon codicon-folder"></i>${escapeHtml(projectName(proj))}</span>`,
     session.gitBranch ? `<span class="chip"><i class="codicon codicon-git-branch"></i>${escapeHtml(session.gitBranch)}</span>` : '',
     session.agentName ? `<span class="chip agent"><i class="codicon codicon-hubot"></i>${escapeHtml(session.agentName)}</span>` : '',
     `<span class="chip" title="Started ${escapeHtml(formatDateTime(session.startTime))}"><i class="codicon codicon-calendar"></i>${escapeHtml(formatDateTime(session.lastTime))}</span>`,
@@ -482,7 +522,7 @@ export function buildHtml(session: SessionInfo, entries: TranscriptEntry[], o: H
       body.push(`<div class="divider day"><span>${escapeHtml(dayLabel(e.timestamp))}</span></div>`);
       lastDay = day;
     }
-    body.push(renderEntry(e, o.showThinking));
+    body.push(renderEntry(e, o.showThinking, source));
   }
   const conversation = body.filter(Boolean).join('\n');
   const toolCount = entries.reduce((n, e) => n + e.parts.filter((p) => p.kind === 'tool_use').length, 0);
@@ -499,16 +539,16 @@ export function buildHtml(session: SessionInfo, entries: TranscriptEntry[], o: H
 </head>
 <body${o.highlight?.length ? ` data-highlight="${escapeHtml(JSON.stringify(o.highlight))}"` : ''}>
 <nav class="topbar">
-  <div class="topbar-title"><span class="claude-dot">${CLAUDE_MARK}</span><span>${escapeHtml(session.title)}</span></div>
+  <div class="topbar-title"><span class="${claude ? 'claude-dot' : 'source-dot'}">${assistantMark(source)}</span><span>${escapeHtml(session.title)}</span></div>
   <div class="topbar-actions">
-    <button class="btn primary" data-cmd="resume" title="Resume this session with the Claude Code CLI"><i class="codicon codicon-play"></i><span>Resume</span></button>
-    <button class="btn" data-cmd="continueInNewSession" title="Start a new Claude Code CLI session with a handoff of where this one left off"><i class="codicon codicon-arrow-circle-right"></i><span>Continue in new session</span></button>
-    <button class="icon-btn" data-cmd="continueInNewSessionWithModel" title="Continue in a new session with a different model or effort…"><i class="codicon codicon-chevron-down"></i></button>
-    ${o.hasClaudeCode ? '<button class="btn" data-cmd="openInClaudeCode" title="Open in the Claude Code chat"><i class="codicon codicon-comment-discussion"></i><span>Open in chat</span></button>' : ''}
+    <button class="btn primary" data-cmd="resume" title="${escapeHtml(source.resumeTitle)}"><i class="codicon codicon-${source.id === 'vscode-chat' ? 'chat-sparkle' : 'play'}"></i><span>${escapeHtml(source.resumeLabel)}</span></button>
+    <button class="btn" data-cmd="continueInNewSession" title="${escapeHtml(source.id === 'vscode-chat' ? 'Start a new chat with a handoff of where this one left off' : `Start a new ${source.label} session with a handoff of where this one left off`)}"><i class="codicon codicon-arrow-circle-right"></i><span>Continue in new session</span></button>
+    <button class="icon-btn" data-cmd="continueInNewSessionWithModel" title="Continue in another tool, or with a different model or effort…"><i class="codicon codicon-chevron-down"></i></button>
+    ${claude && o.hasClaudeCode ? '<button class="btn" data-cmd="openInClaudeCode" title="Open in the Claude Code chat"><i class="codicon codicon-comment-discussion"></i><span>Open in chat</span></button>' : ''}
     ${o.preview ? '<button class="btn" data-cmd="keepOpen" title="This tab is reused for the next transcript you open. Keep this one in its own tab."><i class="codicon codicon-pinned"></i><span>Keep open</span></button>' : ''}
     <button class="icon-btn" data-cmd="refresh" title="Reload"><i class="codicon codicon-refresh"></i></button>
     <button class="icon-btn" data-cmd="copyId" title="Copy session ID"><i class="codicon codicon-copy"></i></button>
-    <button class="icon-btn" data-cmd="openRawFile" title="Open raw JSONL"><i class="codicon codicon-json"></i></button>
+    <button class="icon-btn" data-cmd="openRawFile" title="Open the raw session log"><i class="codicon codicon-json"></i></button>
   </div>
   ${renderStatsStrip(session, toolCount)}
 </nav>

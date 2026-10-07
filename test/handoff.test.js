@@ -2,7 +2,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const os = require('node:os');
 const path = require('node:path');
-const { collectHandoffFacts, buildHandoff, MAX_HANDOFF } = require('../out/handoff');
+const fs = require('node:fs');
+const { collectHandoffFacts, collectTranscriptFacts, buildHandoff, MAX_HANDOFF } = require('../out/handoff');
+const { parseCopilotTranscript } = require('../out/copilotCliParser');
+const { parseChatTranscript } = require('../out/vscodeChatParser');
 
 const jsonl = (...recs) => recs.map((r) => JSON.stringify(r)).join('\n') + '\n';
 const user = (content, extra = {}) => ({ type: 'user', message: { role: 'user', content }, ...extra });
@@ -144,4 +147,44 @@ test('collectHandoffFacts: an interrupted turn falls back to the whole turn, and
   assert.equal(f.lastReply, 'Updating the CSS.\n\nNow tests.');
   assert.equal(f.replyIsWholeTurn, true);
   assert.equal(f.previousPrompt, 'Add dark mode');
+});
+
+test('collectTranscriptFacts: Copilot CLI and VS Code Chat transcripts', () => {
+  const fixtures = path.join(__dirname, 'fixtures');
+  const dir = fs.readdirSync(path.join(fixtures, 'copilot-cli')).find((d) => d.startsWith('3f2a'));
+  const log = fs.readFileSync(path.join(fixtures, 'copilot-cli', dir, 'events.jsonl'), 'utf8');
+  const cli = collectTranscriptFacts(parseCopilotTranscript(log), path.join(os.tmpdir(), 'repo'));
+  assert.ok(cli.lastPrompt);
+  assert.ok(cli.lastReply);
+  // router.ts was viewed, then edited: listed once, as changed, resolved against the session's folder.
+  assert.deepEqual(cli.modified, [path.join(os.tmpdir(), 'repo', 'src', 'router.ts')]);
+  assert.deepEqual(cli.read, []);
+
+  // A VS Code read call saves no input, only "Read <path>"; the path is taken from there.
+  const entries = parseChatTranscript(
+    JSON.stringify({
+      kind: 0,
+      v: {
+        requests: [
+          {
+            message: { text: 'read the readme' },
+            response: [
+              { kind: 'toolInvocationSerialized', toolId: 'copilot_readFile', isComplete: true, pastTenseMessage: { value: 'Read [](file:///c%3A/repo/README.md)' } },
+              { kind: 'toolInvocationSerialized', toolId: 'copilot_replaceString', isComplete: true, toolSpecificData: { filePath: 'C:\\repo\\a.ts' } },
+              { value: 'Summary of the readme.' },
+            ],
+          },
+        ],
+      },
+    }),
+  );
+  const chat = collectTranscriptFacts(entries);
+  assert.equal(chat.lastPrompt, 'read the readme');
+  assert.equal(chat.lastReply, 'Summary of the readme.');
+  assert.deepEqual(chat.modified, ['C:\\repo\\a.ts']);
+  assert.equal(chat.read.length, 1);
+  assert.match(chat.read[0], /repo[\\/]README\.md$/);
+  const text = buildHandoff({ ...session, source: 'vscode-chat' }, chat, 'C:\\repo', undefined, 'claude');
+  assert.match(text, /^I'm continuing work from an earlier VS Code Chat session/);
+  assert.match(text, /## Copilot's last reply\nSummary of the readme\./);
 });

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { parseQuery, evaluate, snippet, isEmptyQuery } = require('../out/query');
+const { parseQuery, evaluate, snippet, isEmptyQuery, sourceAllowed } = require('../out/query');
 
 const terms = (q) => parseQuery(q).clauses.map((alts) => alts.map((t) => (t.negate ? '-' : '') + t.text));
 const hit = (q, ...texts) => evaluate(parseQuery(q), texts);
@@ -19,6 +19,23 @@ test('parseQuery: words, phrases, exclusions and OR', () => {
   assert.deepEqual(terms('- ""'), [['-']]);
   assert.ok(isEmptyQuery(parseQuery('  ""  ')));
   assert.deepEqual(parseQuery('Login -x a OR LOGIN').highlight, ['login', 'a']);
+});
+
+test('parseQuery: source terms filter by source and stay out of the text search', () => {
+  const q = parseQuery('login source:copilot -source:chat SOURCE:Claude');
+  assert.deepEqual(terms('login source:copilot -source:chat'), [['login']]);
+  assert.deepEqual(q.sources, { include: ['copilot-cli', 'claude'], exclude: ['vscode-chat'] });
+  assert.deepEqual(q.highlight, ['login']);
+  assert.ok(sourceAllowed(q, 'copilot-cli'));
+  assert.ok(!sourceAllowed(q, 'vscode-chat'));
+  // A source-only query is not empty, and matches any text.
+  const only = parseQuery('source:cli');
+  assert.ok(!isEmptyQuery(only));
+  assert.ok(evaluate(only, ['anything']));
+  assert.ok(!sourceAllowed(only, 'claude'));
+  // Unknown names and quoted terms are searched for as text.
+  assert.deepEqual(terms('source:map "source:copilot"'), [['source:map'], ['source:copilot']]);
+  assert.ok(sourceAllowed(parseQuery('source:map'), 'claude'));
 });
 
 test('evaluate: phrase vs words, case, whitespace, exclusion, OR, several texts', () => {

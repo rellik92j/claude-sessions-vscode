@@ -1,0 +1,46 @@
+{
+  "version": 3,
+  "requesterUsername": "me",
+  "responderUsername": "GitHub Copilot",
+  "sessionId": "a0a0a0a0-0000-0000-0000-000000000001",
+  "creationDate": 1759000000000,
+  "lastMessageDate": 1759000060000,
+  "requests": [
+    {
+      "requestId": "r1",
+      "timestamp": 1759000010000,
+      "message": {
+        "text": "What is a monad?",
+        "parts": []
+      },
+      "response": [
+        {
+          "value": "A monoid in the category of endofunctors.",
+          "supportThemeIcons": false,
+          "supportHtml": false
+        }
+      ],
+      "result": {
+        "timings": {
+          "totalElapsed": 1200
+        }
+      },
+      "modelId": "gpt-4.1"
+    },
+    {
+      "requestId": "r2",
+      "timestamp": 1759000050000,
+      "message": {
+        "text": "Shorter please",
+        "parts": []
+      },
+      "response": [],
+      "result": {
+        "errorDetails": {
+          "message": "Request was canceled"
+        }
+      },
+      "isCanceled": true
+    }
+  ]
+}

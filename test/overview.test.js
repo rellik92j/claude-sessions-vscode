@@ -54,14 +54,14 @@ test('overview: range splits a long session, totals, projects, models and top se
   assert.deepEqual(o.projects.map((p) => [p.name, p.sessions, p.cost]), [['other', 1, 8], ['repo', 2, 6]]);
   assert.deepEqual(o.models.map((m) => m.model), ['opus-5-5', 'sonnet-5-5']);
   close(o.models[1].cost, 2);
-  assert.deepEqual(o.topSessions.map((s) => s.id), ['c', 'a', 'b']);
+  assert.deepEqual(o.topSessions.map((s) => s.id), ['claude:c', 'claude:a', 'claude:b']);
   // Bars split by model and project; colors follow all-time cost, so they hold when the range changes.
   close(o.buckets[5].byModel['sonnet-5-5'], 2);
   close(o.buckets[4].byProject[normalizePath('/repo')], 4);
   assert.deepEqual(o.series.model, ['opus-5-5', 'sonnet-5-5']);
   assert.deepEqual(o.series.project, [normalizePath('/repo'), normalizePath('/other'), normalizePath('/old')]);
   close(o.topSessions[1].cost, 4);
-  assert.deepEqual(o.recentSessions.map((s) => s.id), ['c', 'b', 'a']);
+  assert.deepEqual(o.recentSessions.map((s) => s.id), ['claude:c', 'claude:b', 'claude:a']);
 
   const all = buildOverview(sessions, 0, now);
   assert.equal(all.from, dayKey(now - 200 * DAY));

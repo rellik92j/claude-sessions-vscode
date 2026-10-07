@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import { isInside } from './format';
 import { projectPath, SessionModel, workspaceFolderPaths } from './model';
 import { buildOverview, OVERVIEW_RANGES, OverviewRange, projectKey } from './overview';
+import { SessionSource, SOURCE_IDS, SOURCES, toSources } from './sources';
 
 /** Which projects the overview covers: those in the open workspace folders, all, or a pick. */
 type Scope = 'workspace' | 'all' | 'pick';
@@ -16,6 +17,8 @@ export class OverviewPanel {
   private scope: Scope = 'workspace';
   /** Keys of the picked projects, for the 'pick' scope. */
   private projects: string[] = [];
+  /** Sources the overview covers; its own choice, independent of the sidebar's chips. */
+  private sources: SessionSource[] = [...SOURCE_IDS];
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -54,8 +57,9 @@ export class OverviewPanel {
     if (!this.panel || !this.ready) {
       return;
     }
-    // The overview has its own project filter, so it ignores the sidebar's Workspace filter.
-    const sessions = this.model.visibleSessions(false);
+    // The overview has its own project and source filters, so it ignores the sidebar's.
+    const present = this.model.presentSources();
+    const sessions = this.model.visibleSessions(false, new Set(this.sources));
     const folders = workspaceFolderPaths();
     const workspaceKeys = [
       ...new Set(sessions.filter((s) => folders.some((f) => isInside(projectPath(s), f))).map(projectKey)),
@@ -74,6 +78,11 @@ export class OverviewPanel {
       hasWorkspace: folders.length > 0,
       workspaceName: vscode.workspace.name,
       workspaceKeys,
+      // A choice of sources only once there is more than one.
+      sources:
+        present.length > 1
+          ? present.map((id) => ({ id, label: SOURCES[id].short, title: SOURCES[id].label, icon: SOURCES[id].icon, on: this.sources.includes(id) }))
+          : [],
       overview: buildOverview(sessions, this.range, Date.now(), filter),
     });
   }
@@ -87,6 +96,9 @@ export class OverviewPanel {
         }
         if (SCOPES.includes(msg.scope)) {
           this.scope = msg.scope;
+        }
+        if (Array.isArray(msg.sources)) {
+          this.sources = toSources(msg.sources);
         }
         if (Array.isArray(msg.projects)) {
           this.projects = msg.projects.filter((k: unknown): k is string => typeof k === 'string');

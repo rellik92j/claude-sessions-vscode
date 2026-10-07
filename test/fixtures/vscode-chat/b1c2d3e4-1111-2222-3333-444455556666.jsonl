@@ -1,0 +1,12 @@
+{"kind":0,"v":{"version":3,"creationDate":1759312800000,"initialLocation":"panel","responderUsername":"GitHub Copilot","sessionId":"b1c2d3e4-1111-2222-3333-444455556666","hasPendingEdits":false,"requests":[],"pendingRequests":[],"inputState":{}}}
+{"kind":2,"k":["requests"],"v":[{"requestId":"request_1","timestamp":1759312810000,"modelId":"copilot/gpt-5","message":{"text":"Explain #file:auth.ts","parts":[]},"response":[],"result":{}}]}
+{"kind":2,"k":["requests",0,"response"],"v":[{"kind":"thinking","value":"Considering the file"},{"value":"The file ","supportThemeIcons":false}]}
+{"kind":2,"k":["requests",0,"response"],"v":[{"kind":"inlineReference","inlineReference":{"scheme":"file","path":"/c:/repo/src/auth.ts"}},{"kind":"markdownContent","content":{"value":" exports **login**."}}]}
+{"kind":2,"k":["requests",0,"response"],"v":[{"kind":"toolInvocationSerialized","toolId":"copilot_readFile","toolCallId":"tc1","invocationMessage":{"value":"Reading auth.ts"},"pastTenseMessage":{"value":"Read auth.ts"},"isComplete":true,"resultDetails":{"input":"{\"filePath\":\"/c:/repo/src/auth.ts\"}","output":[{"type":"embed","isText":true,"value":"export function login() {}"}],"isError":false}}]}
+{"kind":2,"k":["requests",0,"response"],"v":[{"kind":"progressMessage","content":{"value":"Working"}},{"kind":"markdownContent","content":{"value":" Overwritten tail"}}]}
+{"kind":2,"k":["requests",0,"response"],"v":[{"kind":"markdownContent","content":{"value":" It is used by the router."}}],"i":5}
+{"kind":1,"k":["requests",0,"result"],"v":{"timings":{"totalElapsed":5000},"metadata":{}}}
+{"kind":1,"k":["customTitle"],"v":"Auth walkthrough"}
+{"kind":2,"k":["requests"],"v":[{"requestId":"request_2","timestamp":1759312900000,"modelId":"copilot/gpt-5","message":{"text":"Thanks","parts":[]},"response":[{"kind":"markdownContent","content":{"value":"You are welcome."}}]}]}
+{"kind":7,"k":["whatever"],"v":1}
+{"kind":1,"k":["lastMessageDate"],"v":1759312905000}

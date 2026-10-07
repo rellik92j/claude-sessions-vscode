@@ -438,3 +438,9 @@ mark {
 @media (max-width: 230px) {
   .segmented span, .chip span { display: none; }
 }
+
+/* Source chips: which tools' sessions are listed. */
+.sources { display: flex; gap: 4px; flex-wrap: wrap; }
+.sources .chip { padding: 2px 8px; font-size: 11px; }
+.sources .chip .n { opacity: 0.75; font-variant-numeric: tabular-nums; }
+.tag.source.copilot-cli, .tag.source.vscode-chat { color: var(--vscode-charts-blue, #3794ff); background: color-mix(in srgb, var(--vscode-charts-blue, #3794ff) 14%, transparent); }

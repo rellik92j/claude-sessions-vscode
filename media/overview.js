@@ -11,6 +11,8 @@
   let sessionSort = saved.sessionSort === 'cost' ? 'cost' : 'recent';
   /** What the chart's bars are split and colored by: 'model', 'project' or 'total'. */
   let colorBy = ['model', 'project', 'total'].includes(saved.colorBy) ? saved.colorBy : 'model';
+  /** Sources shown (claude, copilot-cli, vscode-chat); null until chosen, meaning all of them. */
+  let sources = Array.isArray(saved.sources) ? saved.sources : null;
   let menuQuery = '';
   let state = null;
 
@@ -55,6 +57,8 @@
         </div>
       </div>
       <div class="selected" id="selected"></div>
+      <span class="spacer"></span>
+      <div class="source-chips" id="sources" role="group" aria-label="Show sessions from"></div>
     </div>
     <main id="body"></main>
     <div class="tooltip" id="tip" role="tooltip" hidden></div>`;
@@ -69,6 +73,7 @@
   const $projectItems = document.getElementById('project-items');
   const $projectScopes = document.getElementById('project-scopes');
   const $selected = document.getElementById('selected');
+  const $sources = document.getElementById('sources');
 
   // ---------- helpers ----------
 
@@ -161,9 +166,18 @@
   function renderKpis(o) {
     const t = o.totals;
     const perDay = t.activeDays ? t.cost / t.activeDays : 0;
+    // Only Claude Code logs record token usage, so with other sources shown the cost covers part of the sessions.
+    const mixed = (state.sources || []).some((x) => x.on && x.id !== 'claude');
     return `
       <section class="kpis">
-        ${kpi('Cost', money(t.cost), t.activeDays ? `${money(perDay)} per active day` : '', 'What these sessions would cost at Claude API prices, subagents included')}
+        ${kpi(
+          mixed ? 'Cost <span class="muted">Claude only</span>' : 'Cost',
+          money(t.cost),
+          t.activeDays ? `${money(perDay)} per active day` : '',
+          mixed
+            ? 'What the Claude Code sessions would cost at Claude API prices, subagents included. GitHub Copilot CLI and VS Code Chat logs record no token usage, so they count as $0.'
+            : 'What these sessions would cost at Claude API prices, subagents included',
+        )}
         ${kpi('Sessions', count(t.sessions), t.sessions ? `${money(t.sessions ? t.cost / t.sessions : 0)} each on average` : '')}
         ${kpi('Prompts', count(t.prompts), t.sessions ? `${(t.prompts / t.sessions).toFixed(1)} per session` : '', 'Prompts you typed in these sessions')}
         ${kpi('Projects', count(t.projects), '')}
@@ -315,8 +329,40 @@
 
   // ---------- project filter ----------
 
-  const save = () => vscode.setState({ range, scope, projects, sessionSort, colorBy });
-  const postFilters = () => vscode.postMessage({ type: 'setFilters', range, scope, projects });
+  const save = () => vscode.setState({ range, scope, projects, sessionSort, colorBy, sources });
+  const postFilters = () => vscode.postMessage({ type: 'setFilters', range, scope, projects, ...(sources ? { sources } : {}) });
+
+  /**
+   * Source chips work as a filter: with everything shown, clicking a source shows just that one; clicking another adds
+   * it; clicking a chosen one removes it, and removing the last one (or choosing them all) goes back to everything.
+   * Returns the sources to show, or null for all of them.
+   */
+  function nextSources(chips, id) {
+    const all = chips.every((x) => x.on);
+    const chosen = chips.filter((x) => x.on).map((x) => x.id);
+    if (all) return [id];
+    const next = chosen.includes(id) ? chosen.filter((x) => x !== id) : [...chosen, id];
+    return next.length === 0 || next.length === chips.length ? null : next;
+  }
+
+  /** All, then a chip per source; while all are shown, only All is lit. */
+  function renderSources() {
+    const list = state?.sources || [];
+    if (!list.length) {
+      $sources.innerHTML = '';
+      return;
+    }
+    const all = list.every((x) => x.on);
+    const chip = (id, on, title, inner) =>
+      `<button class="chip${on ? ' on' : ''}" data-source="${esc(id)}" aria-pressed="${on}" title="${esc(title)}">${inner}</button>`;
+    $sources.innerHTML =
+      chip('*', all, 'Show sessions from every source', 'All') +
+      list
+        .map((x) =>
+          chip(x.id, !all && x.on, `${x.title}${all ? ': show only these' : x.on ? ': stop showing these' : ': show these too'}`, `<i class="codicon codicon-${esc(x.icon)}"></i><span>${esc(x.label)}</span>`),
+        )
+        .join('');
+  }
 
   function setScope(next, picked = projects) {
     scope = next;
@@ -418,6 +464,7 @@
       return;
     }
     renderFilter();
+    renderSources();
     const o = state.overview;
     $sub.textContent = o.from === o.to ? longDay(o.to) : `${longDay(o.from)} – ${longDay(o.to)}`;
     if (!o.totals.sessions) {
@@ -510,6 +557,14 @@
       postFilters();
       return;
     }
+    const sourceBtn = e.target.closest('[data-source]');
+    if (sourceBtn && state) {
+      const id = sourceBtn.dataset.source;
+      sources = (id === '*' ? null : nextSources(state.sources, id)) ?? ['claude', 'copilot-cli', 'vscode-chat'];
+      save();
+      postFilters();
+      return;
+    }
     const scopeBtn = e.target.closest('[data-scope]');
     if (scopeBtn) {
       openMenu(false);
@@ -583,5 +638,5 @@
   });
 
   render();
-  vscode.postMessage({ type: 'ready', range, scope, projects });
+  vscode.postMessage({ type: 'ready', range, scope, projects, ...(sources ? { sources } : {}) });
 })();

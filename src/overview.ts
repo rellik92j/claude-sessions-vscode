@@ -3,7 +3,8 @@
 
 import * as path from 'path';
 import { hueFor, normalizePath } from './format';
-import { decodeProjectDir, SessionInfo } from './sessionParser';
+import { SessionInfo } from './sessionParser';
+import { NO_FOLDER, sessionFolder, sessionKey } from './sources';
 import { dayKey } from './usage';
 
 /** Days back from today, or 0 for all time. */
@@ -39,6 +40,7 @@ export interface OverviewProject {
 }
 
 export interface OverviewSession {
+  /** The session key. */
   id: string;
   title: string;
   project: string;
@@ -87,10 +89,10 @@ export interface Overview {
 
 const sessionTime = (s: SessionInfo) => s.lastTime ?? s.startTime ?? 0;
 
-const sessionPath = (s: SessionInfo) => s.cwd ?? decodeProjectDir(s.projectDir);
+const sessionPath = sessionFolder;
 
 function choiceFor(p: string, lastTime: number): ProjectChoice {
-  return { key: normalizePath(p), name: path.basename(p) || p, path: p, hue: hueFor(p), lastTime };
+  return { key: normalizePath(p), name: p ? path.basename(p) || p : NO_FOLDER, path: p, hue: hueFor(p), lastTime };
 }
 
 /** Days a session did anything: days it made API requests, and the day of its last message. */
@@ -197,7 +199,7 @@ export function buildOverview(sessions: SessionInfo[], range: OverviewRange, now
     for (const d of inRange) {
       allDays.add(d);
       const b = buckets[bucketOf.get(d)!];
-      b.ids.add(s.id);
+      b.ids.add(sessionKey(s));
       for (const [model, c] of Object.entries(s.usage?.daily[d] ?? {})) {
         b.cost += c;
         b.byModel[model] = (b.byModel[model] ?? 0) + c;
@@ -219,7 +221,7 @@ export function buildOverview(sessions: SessionInfo[], range: OverviewRange, now
     proj.cost += sCost;
     proj.lastTime = Math.max(proj.lastTime, sessionTime(s));
 
-    listed.push({ id: s.id, title: s.title, project: proj.name, projectKey: proj.key, hue: proj.hue, prompts: s.promptCount, cost: sCost, lastTime: sessionTime(s) });
+    listed.push({ id: sessionKey(s), title: s.title, project: proj.name, projectKey: proj.key, hue: proj.hue, prompts: s.promptCount, cost: sCost, lastTime: sessionTime(s) });
   }
 
   return {

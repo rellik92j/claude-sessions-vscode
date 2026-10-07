@@ -1,8 +1,8 @@
 {
   "name": "claude-sessions",
   "displayName": "Claude Sessions",
-  "description": "Browse, search, read and resume all of your Claude Code sessions from the VS Code sidebar.",
-  "version": "0.2.9",
+  "description": "Browse, search, read and resume your Claude Code, GitHub Copilot CLI and VS Code Chat sessions from the VS Code sidebar.",
+  "version": "0.3.0",
   "publisher": "local",
   "license": "MIT",
   "repository": {
@@ -75,7 +75,7 @@
       },
       {
         "command": "claudeSessions.resume",
-        "title": "Resume in Claude Code Terminal",
+        "title": "Resume Session",
         "category": "Claude Sessions",
         "icon": "$(play)"
       },
@@ -87,7 +87,7 @@
       },
       {
         "command": "claudeSessions.continueInNewSessionWithModel",
-        "title": "Continue in New Session with Model…",
+        "title": "Continue in New Session with Tool or Model…",
         "category": "Claude Sessions"
       },
       {
@@ -110,7 +110,7 @@
       },
       {
         "command": "claudeSessions.openRawFile",
-        "title": "Open Raw JSONL",
+        "title": "Open Raw Log",
         "category": "Claude Sessions"
       },
       {
@@ -249,7 +249,7 @@
         },
         {
           "command": "claudeSessions.openInClaudeCode",
-          "when": "webviewId == 'claudeSessions.list' && webviewSection == 'session' && claudeSessions.hasClaudeCode",
+          "when": "webviewId == 'claudeSessions.list' && webviewSection == 'session' && sessionSource == 'claude' && claudeSessions.hasClaudeCode",
           "group": "1_main@4"
         },
         {
@@ -279,7 +279,7 @@
         },
         {
           "command": "claudeSessions.copyResumeCommand",
-          "when": "webviewId == 'claudeSessions.list' && webviewSection == 'session'",
+          "when": "webviewId == 'claudeSessions.list' && webviewSection == 'session' && sessionSource != 'vscode-chat'",
           "group": "3_copy@2"
         },
         {
@@ -296,6 +296,44 @@
           "type": "string",
           "default": "",
           "description": "Folder containing Claude Code session logs. Empty = $CLAUDE_CONFIG_DIR/projects or ~/.claude/projects."
+        },
+        "claudeSessions.sources": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "claude",
+              "copilot-cli",
+              "vscode-chat"
+            ],
+            "enumDescriptions": [
+              "Claude Code",
+              "GitHub Copilot CLI",
+              "VS Code Chat (GitHub Copilot Chat)"
+            ]
+          },
+          "uniqueItems": true,
+          "default": [
+            "claude",
+            "copilot-cli",
+            "vscode-chat"
+          ],
+          "description": "Whose sessions the sidebar shows when a window opens. The chips above the list change this for the current window only."
+        },
+        "claudeSessions.copilotDir": {
+          "type": "string",
+          "default": "",
+          "description": "GitHub Copilot CLI's folder, with sessions in its session-state folder. Empty = $COPILOT_HOME or ~/.copilot."
+        },
+        "claudeSessions.vscodeUserDir": {
+          "type": "string",
+          "default": "",
+          "description": "VS Code's user data folder, whose workspaceStorage holds the chat sessions. Empty = the default folders of VS Code and VS Code Insiders."
+        },
+        "claudeSessions.copilotCommand": {
+          "type": "string",
+          "default": "copilot",
+          "description": "Command used to launch GitHub Copilot CLI when resuming a session."
         },
         "claudeSessions.groupBy": {
           "type": "string",
