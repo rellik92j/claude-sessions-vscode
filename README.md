@@ -1,10 +1,10 @@
-# Claude Sessions
+# SessionsAI
 
 **Find, read and pick up any Claude Code session without leaving VS Code. Your GitHub Copilot CLI and VS Code Chat sessions show up too.**
 
-[Claude Code](https://claude.com/claude-code) saves every conversation you have with it, but finding an old one means scrolling through `claude --resume` and guessing from the first line. Claude Sessions adds a sidebar that shows all of your sessions across every project. You can search everything you and Claude said, read any conversation as a chat transcript, see what each session used and cost (or chart what all of them cost, by day, model and project), and resume it in one click, or carry it over into a fresh session, even in a different tool. Your [GitHub Copilot CLI and VS Code Chat](#github-copilot-cli-and-vs-code-chat-sessions-too) sessions are listed alongside, so one search covers all of them.
+[Claude Code](https://claude.com/claude-code) saves every conversation you have with it, but finding an old one means scrolling through `claude --resume` and guessing from the first line. SessionsAI adds a sidebar that shows all of your sessions across every project. You can search everything you and Claude said, read any conversation as a chat transcript, see what each session used and cost (or chart what all of them cost, by day, model and project), and resume it in one click, or carry it over into a fresh session, even in a different tool. Your [GitHub Copilot CLI and VS Code Chat](#github-copilot-cli-and-vs-code-chat-sessions-too) sessions are listed alongside, so one search covers all of them.
 
-![The Claude Sessions sidebar next to a transcript](docs/images/overview.png)
+![The SessionsAI sidebar next to a transcript](docs/images/overview.png)
 
 ## What you can do with it
 
@@ -27,7 +27,7 @@ The sidebar refreshes on its own as sessions change, and everything follows your
 
 Press `/` to search. The search covers the card details and the full conversation: your prompts and Claude's replies, and the paths of files Claude's tools read or edited, but not tool output. When a session matches inside its conversation, its card shows the matching passage.
 
-To find the sessions that worked on a file, right-click it in the Explorer or right-click its editor tab and choose **Search Claude Sessions for This File**. The sidebar opens with the file name in the search box.
+To find the sessions that worked on a file, right-click it in the Explorer or right-click its editor tab and choose **Search Sessions for This File**. The sidebar opens with the file name in the search box.
 
 | Type | To find |
 | --- | --- |
@@ -76,7 +76,7 @@ The numbers are worked out on your machine from the token counts in the session 
 
 ![The overview: totals, cost per day split by model, projects, models and recent sessions](docs/images/overview-page.png)
 
-Click the dashboard button at the top of the sidebar, or run **Claude Sessions: Open Overview**, to open a summary in an editor tab. For the last 7, 30 or 90 days, or all time, it shows:
+Click the dashboard button at the top of the sidebar, or run **SessionsAI: Open Overview**, to open a summary in an editor tab. For the last 7, 30 or 90 days, or all time, it shows:
 
 - **Totals:** cost at API prices, sessions, prompts, projects and active days.
 - **Cost per day:** each bar is split by model or by project, whichever you pick under **Color by** (or **Total** for plain bars), with a legend below. Hover a bar for that day's breakdown. A model or project keeps its color when you change the range.
@@ -118,24 +118,25 @@ The other tools are optional. Their sessions are listed whenever their logs are 
 - **[GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli)**, so that `copilot` runs in a terminal, for Copilot CLI sessions.
 - The **GitHub Copilot Chat** extension, for opening VS Code chats and continuing work in a new chat.
 
-Claude Sessions isn't on the VS Code Marketplace yet. To install it:
+To install it:
 
-1. Download the latest `claude-sessions-<version>.vsix` from the [Releases page](https://github.com/rellik92j/claude-sessions-vscode/releases/latest).
-2. In VS Code, open the Extensions view, click the `…` menu at the top, and choose **Install from VSIX…**. Then pick the file you downloaded.
-
-   Or, from a terminal:
+1. In VS Code, open the Extensions view, search for **SessionsAI**, and click **Install**. Or install it from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=rellik92j.sessionsai), or from a terminal:
 
    ```sh
-   code --install-extension claude-sessions-0.3.2.vsix
+   code --install-extension rellik92j.sessionsai
    ```
 
-3. Click the **Claude Sessions** icon in the Activity Bar.
+2. Click the **SessionsAI** icon in the Activity Bar.
 
-To update, install the newer `.vsix` the same way. To reinstall a build with the same version number, add `--force` to the terminal command.
+VS Code keeps it up to date on its own.
+
+If you installed an earlier version from a `.vsix` file, uninstall that one first. It was published as `local.claude-sessions`, so VS Code treats it as a different extension and won't update it.
+
+Each release's `.vsix` is also on the [Releases page](https://github.com/rellik92j/claude-sessions-vscode/releases/latest), for installing with **Install from VSIX…** in the Extensions view's `…` menu.
 
 ## Privacy
 
-Claude Sessions only reads the session logs that are already on your machine: Claude Code's in `~/.claude/projects` (or `$CLAUDE_CONFIG_DIR/projects` if you set it), GitHub Copilot CLI's in `~/.copilot/session-state`, and VS Code Chat's in VS Code's `workspaceStorage` folder. It sends nothing over the network, and it never changes or deletes your logs.
+SessionsAI only reads the session logs that are already on your machine: Claude Code's in `~/.claude/projects` (or `$CLAUDE_CONFIG_DIR/projects` if you set it), GitHub Copilot CLI's in `~/.copilot/session-state`, and VS Code Chat's in VS Code's `workspaceStorage` folder. It sends nothing over the network, and it never changes or deletes your logs.
 
 ## Keyboard shortcuts
 
@@ -153,7 +154,7 @@ In the sidebar:
 
 In a transcript: F3 / Shift+F3 step through search matches, and Esc clears them.
 
-The **Claude Sessions: Search Sessions…** command in the Command Palette searches transcripts too, **Claude Sessions: Search Claude Sessions for This File** searches for the file in the active editor, and **Claude Sessions: Open Overview** opens the overview.
+The **SessionsAI: Search Sessions…** command in the Command Palette searches transcripts too, **SessionsAI: Search Sessions for This File** searches for the file in the active editor, and **SessionsAI: Open Overview** opens the overview.
 
 ## Settings
 
@@ -177,7 +178,7 @@ The **Claude Sessions: Search Sessions…** command in the Command Palette searc
 ```sh
 npm install
 npm test          # compile, bundle and run unit tests (plus a smoke test against your real ~/.claude/projects)
-npm run package   # build claude-sessions-<version>.vsix
+npm run package   # build sessionsai-<version>.vsix
 ```
 
 Press F5 with this folder open to run the extension in a development host.
