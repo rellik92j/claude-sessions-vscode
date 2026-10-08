@@ -2,7 +2,7 @@
   "name": "sessionsai",
   "displayName": "SessionsAI — Claude Code, Copilot, & VS Code Chat Manager",
   "description": "Browse, search, read and resume your Claude Code, GitHub Copilot CLI and VS Code Chat sessions from the VS Code sidebar.",
-  "version": "0.5.0",
+  "version": "0.4.1",
   "publisher": "rellik92j",
   "icon": "media/icon.png",
   "license": "MIT",
