@@ -1,9 +1,10 @@
 {
-  "name": "claude-sessions",
-  "displayName": "Claude Sessions",
+  "name": "sessionsai",
+  "displayName": "SessionsAI — Claude Code, Copilot, & VS Code Chat Manager",
   "description": "Browse, search, read and resume your Claude Code, GitHub Copilot CLI and VS Code Chat sessions from the VS Code sidebar.",
-  "version": "0.3.2",
-  "publisher": "local",
+  "version": "0.4.0",
+  "publisher": "rellik92j",
+  "icon": "media/icon.png",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -13,6 +14,7 @@
     "vscode": "^1.90.0"
   },
   "categories": [
+    "AI",
     "Other"
   ],
   "main": "./dist/extension.js",
@@ -22,7 +24,7 @@
       "activitybar": [
         {
           "id": "claudeSessions",
-          "title": "Claude Sessions",
+          "title": "SessionsAI",
           "icon": "media/icon.svg"
         }
       ]
@@ -40,116 +42,116 @@
       {
         "command": "claudeSessions.refresh",
         "title": "Refresh",
-        "category": "Claude Sessions",
+        "category": "SessionsAI",
         "icon": "$(refresh)"
       },
       {
         "command": "claudeSessions.search",
         "title": "Search Sessions…",
-        "category": "Claude Sessions",
+        "category": "SessionsAI",
         "icon": "$(search)"
       },
       {
         "command": "claudeSessions.groupByProject",
         "title": "Group by Project",
-        "category": "Claude Sessions",
+        "category": "SessionsAI",
         "icon": "$(folder)"
       },
       {
         "command": "claudeSessions.groupByDate",
         "title": "Group by Date",
-        "category": "Claude Sessions",
+        "category": "SessionsAI",
         "icon": "$(calendar)"
       },
       {
         "command": "claudeSessions.showCurrentWorkspaceOnly",
         "title": "Show Only Current Workspace",
-        "category": "Claude Sessions",
+        "category": "SessionsAI",
         "icon": "$(filter)"
       },
       {
         "command": "claudeSessions.showAll",
         "title": "Show All Projects",
-        "category": "Claude Sessions",
+        "category": "SessionsAI",
         "icon": "$(filter-filled)"
       },
       {
         "command": "claudeSessions.resume",
         "title": "Resume Session",
-        "category": "Claude Sessions",
+        "category": "SessionsAI",
         "icon": "$(play)"
       },
       {
         "command": "claudeSessions.continueInNewSession",
         "title": "Continue in New Session",
-        "category": "Claude Sessions",
+        "category": "SessionsAI",
         "icon": "$(arrow-circle-right)"
       },
       {
         "command": "claudeSessions.continueInNewSessionWithModel",
         "title": "Continue in New Session with Tool or Model…",
-        "category": "Claude Sessions"
+        "category": "SessionsAI"
       },
       {
         "command": "claudeSessions.openInClaudeCode",
         "title": "Open in Claude Code Chat",
-        "category": "Claude Sessions",
+        "category": "SessionsAI",
         "icon": "$(comment-discussion)"
       },
       {
         "command": "claudeSessions.openTranscript",
         "title": "Open Transcript",
-        "category": "Claude Sessions",
+        "category": "SessionsAI",
         "icon": "$(book)"
       },
       {
         "command": "claudeSessions.openTranscriptInNewTab",
         "title": "Open Transcript in New Tab",
-        "category": "Claude Sessions",
+        "category": "SessionsAI",
         "icon": "$(pinned)"
       },
       {
         "command": "claudeSessions.openRawFile",
         "title": "Open Raw Log",
-        "category": "Claude Sessions"
+        "category": "SessionsAI"
       },
       {
         "command": "claudeSessions.copyId",
         "title": "Copy Session ID",
-        "category": "Claude Sessions"
+        "category": "SessionsAI"
       },
       {
         "command": "claudeSessions.copyResumeCommand",
         "title": "Copy Resume Command",
-        "category": "Claude Sessions"
+        "category": "SessionsAI"
       },
       {
         "command": "claudeSessions.openPr",
         "title": "Open Pull Request",
-        "category": "Claude Sessions",
+        "category": "SessionsAI",
         "icon": "$(git-pull-request)"
       },
       {
         "command": "claudeSessions.revealFolder",
         "title": "Open Project Folder in New Window",
-        "category": "Claude Sessions"
+        "category": "SessionsAI"
       },
       {
         "command": "claudeSessions.focusSearch",
         "title": "Focus Session Search",
-        "category": "Claude Sessions",
+        "category": "SessionsAI",
         "icon": "$(search)"
       },
       {
         "command": "claudeSessions.searchForFile",
-        "title": "Search Claude Sessions for This File",
-        "category": "Claude Sessions",
+        "title": "Search Sessions for This File",
+        "category": "SessionsAI",
         "icon": "$(search)"
       },
       {
         "command": "claudeSessions.openOverview",
         "title": "Open Overview",
-        "category": "Claude Sessions",
+        "category": "SessionsAI",
         "icon": "$(dashboard)"
       }
     ],
@@ -314,7 +316,7 @@
       ]
     },
     "configuration": {
-      "title": "Claude Sessions",
+      "title": "SessionsAI",
       "properties": {
         "claudeSessions.projectsDir": {
           "type": "string",

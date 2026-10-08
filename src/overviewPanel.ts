@@ -34,7 +34,7 @@ export class OverviewPanel {
     }
     const codicons = vscode.Uri.joinPath(this.extensionUri, 'node_modules', '@vscode', 'codicons', 'dist');
     const media = vscode.Uri.joinPath(this.extensionUri, 'media');
-    const panel = vscode.window.createWebviewPanel('claudeSessions.overview', 'Claude Sessions Overview', vscode.ViewColumn.Active, {
+    const panel = vscode.window.createWebviewPanel('claudeSessions.overview', 'SessionsAI Overview', vscode.ViewColumn.Active, {
       enableScripts: true,
       retainContextWhenHidden: true,
       localResourceRoots: [codicons, media],
