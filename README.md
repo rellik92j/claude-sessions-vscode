@@ -126,7 +126,7 @@ Claude Sessions isn't on the VS Code Marketplace yet. To install it:
    Or, from a terminal:
 
    ```sh
-   code --install-extension claude-sessions-0.3.1.vsix
+   code --install-extension claude-sessions-0.3.2.vsix
    ```
 
 3. Click the **Claude Sessions** icon in the Activity Bar.
