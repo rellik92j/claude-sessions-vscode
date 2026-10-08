@@ -172,6 +172,7 @@ The **SessionsAI: Search Sessions…** command in the Command Palette searches t
 | `claudeSessions.terminalLocation` | `editor` | Open CLI terminals as an `editor` tab or in the bottom `panel`. |
 | `claudeSessions.showThinking` | `false` | Show Claude's thinking blocks in transcripts. |
 | `claudeSessions.reuseTranscriptTab` | `true` | Reuse one preview tab for transcripts. When off, every transcript gets its own tab. |
+| `claudeSessions.closeTranscriptOnResume` | `true` | Close a transcript tab when you resume, continue or open its session from it. |
 
 ## Development
 

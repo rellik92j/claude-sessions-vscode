@@ -218,21 +218,24 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
-  /** Opens a VS Code chat in this window when it belongs here; otherwise offers its folder's window. */
-  const openChat = async (session: SessionInfo) => {
+  /**
+   * Opens a VS Code chat in this window when it belongs here; otherwise offers its folder's window.
+   * True when the chat opened in this window.
+   */
+  const openChat = async (session: SessionInfo): Promise<boolean> => {
     // Chats live in workspaceStorage/<hash>/chatSessions/; this extension's own storage sits in the same <hash> folder.
     const chatWorkspace = path.basename(path.dirname(path.dirname(session.filePath)));
     const thisWorkspace = context.storageUri && path.basename(path.dirname(context.storageUri.fsPath));
     if (chatWorkspace === thisWorkspace) {
       try {
         await vscode.commands.executeCommand('vscode.open', chatSessionUri(session.id));
-        return;
+        return true;
       } catch {
         // Fall through to the chat view.
       }
       await vscode.commands.executeCommand('workbench.action.chat.open');
       vscode.window.showInformationMessage(`Couldn't open the chat directly. Find "${session.title}" in the chat history.`);
-      return;
+      return false;
     }
     const folder = projectPath(session);
     const choice = await vscode.window.showInformationMessage(
@@ -247,9 +250,14 @@ export function activate(context: vscode.ExtensionContext): void {
     } else if (choice === 'Read Transcript') {
       await transcripts.open(session);
     }
+    return false;
   };
 
-  const resume = (session: SessionInfo) => {
+  /**
+   * Resumes the session in its own tool. This and the other actions below resolve to true once the session (or its
+   * continuation) has opened, so the transcript it was started from can close; false when cancelled or refused.
+   */
+  const resume = async (session: SessionInfo): Promise<boolean> => {
     if (sourceOf(session) === 'vscode-chat') {
       return openChat(session);
     }
@@ -257,7 +265,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const existing = sessionTerminals.get(key);
     if (existing && existing.exitStatus === undefined) {
       existing.show();
-      return;
+      return true;
     }
     const tool = SOURCES[sourceOf(session)].label;
     const cwd = projectPath(session);
@@ -277,6 +285,7 @@ export function activate(context: vscode.ExtensionContext): void {
     sessionTerminals.set(key, terminal);
     terminal.show();
     terminal.sendText(resumeCommand(session));
+    return true;
   };
 
   /**
@@ -287,7 +296,11 @@ export function activate(context: vscode.ExtensionContext): void {
    * Starts a new session in `target` (by default the session's own tool) whose first prompt is a handoff of where this
    * one left off. `overrides` (model, effort) apply to the CLIs; a VS Code chat uses its own model picker.
    */
-  const continueInNewSession = async (session: SessionInfo, overrides: Overrides = {}, target: SessionSource = sourceOf(session)) => {
+  const continueInNewSession = async (
+    session: SessionInfo,
+    overrides: Overrides = {},
+    target: SessionSource = sourceOf(session),
+  ): Promise<boolean> => {
     const cwd = projectPath(session);
     const hasCwd = !!cwd && existsSync(cwd);
     if (!hasCwd && target !== 'vscode-chat') {
@@ -298,7 +311,7 @@ export function activate(context: vscode.ExtensionContext): void {
       log = await fs.readFile(session.filePath, 'utf8');
     } catch (err) {
       vscode.window.showErrorMessage(`Could not read session log: ${(err as Error).message}`);
-      return;
+      return false;
     }
     const facts = isClaude(session) ? collectHandoffFacts(log) : collectTranscriptFacts(parseTranscriptFor(session, log), cwd || undefined);
     // A handoff saved to a scratchpad may since have been cleaned up.
@@ -329,13 +342,14 @@ export function activate(context: vscode.ExtensionContext): void {
       ],
     });
     terminal.show();
+    return true;
   };
 
   /**
    * Copilot CLI is often a .bat or .ps1 shim on Windows, which would split a multi-line argument, so the handoff goes
    * in a file the CLI is given access to, and the one-line prompt typed into the shell points at it.
    */
-  const continueInCopilot = async (handoff: string, title: string, cwd: string | undefined, overrides: Overrides) => {
+  const continueInCopilot = async (handoff: string, title: string, cwd: string | undefined, overrides: Overrides): Promise<boolean> => {
     const dir = path.join(os.tmpdir(), 'claude-sessions-handoffs');
     const file = path.join(dir, `handoff-${Date.now()}.md`);
     try {
@@ -343,7 +357,7 @@ export function activate(context: vscode.ExtensionContext): void {
       await fs.writeFile(file, handoff, 'utf8');
     } catch (err) {
       vscode.window.showErrorMessage(`Could not write the handoff: ${(err as Error).message}`);
-      return;
+      return false;
     }
     // Double quotes are the one quoting PowerShell, cmd and POSIX shells share; values never contain them.
     const quote = (s: string) => `"${s.replace(/"/g, "'")}"`;
@@ -363,10 +377,11 @@ export function activate(context: vscode.ExtensionContext): void {
     );
     terminal.show();
     terminal.sendText(`${command} ${args.join(' ')}`);
+    return true;
   };
 
   /** A new VS Code chat in agent mode with the handoff in its input box, for you to review, pick a model and send. */
-  const continueInChat = async (session: SessionInfo, handoff: string) => {
+  const continueInChat = async (session: SessionInfo, handoff: string): Promise<boolean> => {
     await vscode.commands.executeCommand('workbench.action.chat.newChat');
     await vscode.commands.executeCommand('workbench.action.chat.open', { mode: 'agent', query: handoff, isPartialQuery: true });
     const cwd = projectPath(session);
@@ -375,12 +390,13 @@ export function activate(context: vscode.ExtensionContext): void {
         `The handoff is in a new chat. That chat works in this window's folder, not in ${cwd}, where the session ran.`,
       );
     }
+    return true;
   };
 
-  const openInClaudeCode = async (session: SessionInfo) => {
+  const openInClaudeCode = async (session: SessionInfo): Promise<boolean> => {
     if (!vscode.extensions.getExtension(CLAUDE_CODE_EXTENSION)) {
       vscode.window.showErrorMessage('The Claude Code extension (anthropic.claude-code) is not installed.');
-      return;
+      return false;
     }
     const folders = vscode.workspace.workspaceFolders?.map((f) => f.uri.fsPath) ?? [];
     if (!folders.some((f) => isInside(projectPath(session), f))) {
@@ -393,10 +409,11 @@ export function activate(context: vscode.ExtensionContext): void {
         return resume(session);
       }
       if (choice !== 'Try Anyway') {
-        return;
+        return false;
       }
     }
     await vscode.commands.executeCommand('claude-vscode.editor.open', session.id);
+    return true;
   };
 
   const withSession = (fn: (s: SessionInfo) => unknown) => (arg: unknown) => {
@@ -448,9 +465,7 @@ export function activate(context: vscode.ExtensionContext): void {
       'claudeSessions.continueInNewSessionWithModel',
       withSession(async (s) => {
         const choice = await pickContinuation(s);
-        if (choice) {
-          await continueInNewSession(s, choice.overrides, choice.target);
-        }
+        return !!choice && continueInNewSession(s, choice.overrides, choice.target);
       }),
     ),
     vscode.commands.registerCommand('claudeSessions.openInClaudeCode', withClaudeSession('Open in Claude Code Chat', openInClaudeCode)),
