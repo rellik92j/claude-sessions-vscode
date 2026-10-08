@@ -2,7 +2,7 @@
   "name": "sessionsai",
   "displayName": "SessionsAI — Claude Code, Copilot, & VS Code Chat Manager",
   "description": "Browse, search, read and resume your Claude Code, GitHub Copilot CLI and VS Code Chat sessions from the VS Code sidebar.",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publisher": "rellik92j",
   "icon": "media/icon.png",
   "license": "MIT",
@@ -402,6 +402,11 @@
           "type": "boolean",
           "default": true,
           "description": "Open transcripts in one shared preview tab that the next transcript replaces, like VS Code preview editors. Double-click a session, or use Keep open, to give it its own tab. When off, every transcript gets its own tab."
+        },
+        "claudeSessions.closeTranscriptOnResume": {
+          "type": "boolean",
+          "default": true,
+          "description": "Close a transcript tab when you resume the session, continue it in a new session, or open it in Claude Code chat from that tab, so the session takes its place."
         },
         "claudeSessions.hideEmptySessions": {
           "type": "boolean",

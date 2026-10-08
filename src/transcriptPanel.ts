@@ -90,7 +90,14 @@ export class TranscriptPanels {
         case 'resume':
         case 'continueInNewSession':
         case 'continueInNewSessionWithModel':
-        case 'openInClaudeCode':
+        case 'openInClaudeCode': {
+          // Each resolves to true once the session has opened elsewhere, which then takes this tab's place.
+          const opened = await vscode.commands.executeCommand<boolean>(`claudeSessions.${msg.command}`, tab.session);
+          if (opened === true && vscode.workspace.getConfiguration('claudeSessions').get<boolean>('closeTranscriptOnResume', true)) {
+            panel.dispose();
+          }
+          break;
+        }
         case 'copyId':
         case 'openRawFile':
         case 'openPr':
