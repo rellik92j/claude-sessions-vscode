@@ -128,15 +128,7 @@
     "cacheRead": 0.3,
     "cacheWrite5m": 3.75,
     "cacheWrite1h": 6,
-    "context": 200000,
-    "long": {
-      "above": 200000,
-      "input": 6,
-      "output": 22.5,
-      "cacheRead": 0.6,
-      "cacheWrite5m": 7.5,
-      "cacheWrite1h": 12
-    }
+    "context": 200000
   },
   "sonnet-4": {
     "input": 3,
