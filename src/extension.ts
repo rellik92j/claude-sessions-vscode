@@ -289,21 +289,22 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   /**
-   * Starts a new CLI session whose first prompt is a handoff of where this one left off, optionally with a model
-   * and effort that override the user's Claude Code settings.
-   */
-  /**
    * Starts a new session in `target` (by default the session's own tool) whose first prompt is a handoff of where this
-   * one left off. `overrides` (model, effort) apply to the CLIs; a VS Code chat uses its own model picker.
+   * one left off. `overrides` (model, effort) apply to the CLIs; the chats (VS Code Chat, the Claude Code extension's
+   * chat) use their own model pickers.
    */
   const continueInNewSession = async (
     session: SessionInfo,
     overrides: Overrides = {},
-    target: SessionSource = sourceOf(session),
+    target: ContinueTarget = sourceOf(session),
   ): Promise<boolean> => {
+    if (target === 'claude-chat' && !hasClaudeCode()) {
+      vscode.window.showErrorMessage('The Claude Code extension (anthropic.claude-code) is not installed.');
+      return false;
+    }
     const cwd = projectPath(session);
     const hasCwd = !!cwd && existsSync(cwd);
-    if (!hasCwd && target !== 'vscode-chat') {
+    if (!hasCwd && target !== 'vscode-chat' && target !== 'claude-chat') {
       vscode.window.showWarningMessage(`The session's folder no longer exists (${cwd || 'unknown'}). The new session starts in the default folder.`);
     }
     let log: string;
@@ -316,11 +317,16 @@ export function activate(context: vscode.ExtensionContext): void {
     const facts = isClaude(session) ? collectHandoffFacts(log) : collectTranscriptFacts(parseTranscriptFor(session, log), cwd || undefined);
     // A handoff saved to a scratchpad may since have been cleaned up.
     facts.handoffNotes = facts.handoffNotes?.filter((n) => /^https?:/.test(n) || statSync(n, { throwIfNoEntry: false })?.isFile());
-    const handoff = buildHandoff(session, facts, cwd || undefined, hasCwd ? await gitStatus(cwd) : undefined, target);
+    // The Claude Code chat is the same assistant as its CLI, so it gets the same handoff.
+    const tool: SessionSource = target === 'claude-chat' ? 'claude' : target;
+    const handoff = buildHandoff(session, facts, cwd || undefined, hasCwd ? await gitStatus(cwd) : undefined, tool);
     // Continuing a continued session keeps one "Continued: " rather than stacking them.
     const title = session.title.replace(/^(Continued: )+/, '');
     if (target === 'vscode-chat') {
       return continueInChat(session, handoff);
+    }
+    if (target === 'claude-chat') {
+      return continueInClaudeChat(session, handoff);
     }
     if (target === 'copilot-cli') {
       return continueInCopilot(handoff, title, hasCwd ? cwd : undefined, overrides);
@@ -388,6 +394,26 @@ export function activate(context: vscode.ExtensionContext): void {
     if (cwd && !workspaceFolderPaths().some((f) => isInside(cwd, f))) {
       vscode.window.showInformationMessage(
         `The handoff is in a new chat. That chat works in this window's folder, not in ${cwd}, where the session ran.`,
+      );
+    }
+    return true;
+  };
+
+  /**
+   * A new Claude Code chat (the Claude Code extension's tab, not its CLI) with the handoff in its input box, for you to
+   * review and send. The extension's open command takes a prompt as its second argument and types it in unsent.
+   */
+  const continueInClaudeChat = async (session: SessionInfo, handoff: string): Promise<boolean> => {
+    try {
+      await vscode.commands.executeCommand('claude-vscode.editor.open', undefined, handoff);
+    } catch (err) {
+      vscode.window.showErrorMessage(`Could not open a Claude Code chat: ${(err as Error).message}`);
+      return false;
+    }
+    const cwd = projectPath(session);
+    if (cwd && !workspaceFolderPaths().some((f) => isInside(cwd, f))) {
+      vscode.window.showInformationMessage(
+        `The handoff is in a new Claude Code chat. That chat works in this window's folder, not in ${cwd}, where the session ran.`,
       );
     }
     return true;
@@ -519,38 +545,59 @@ export function activate(context: vscode.ExtensionContext): void {
   model.reload();
 }
 
+/** Where a session can continue: a tool whose sessions are listed, or the Claude Code extension's chat. */
+type ContinueTarget = SessionSource | 'claude-chat';
+
 /** CLI flags for a new session; undefined fields keep the user's Claude Code settings. */
 interface Overrides {
   model?: string;
   effort?: string;
 }
 
-interface ValuePick extends vscode.QuickPickItem {
-  value?: string;
+interface ValuePick<T extends string = string> extends vscode.QuickPickItem {
+  value?: T;
 }
 
 const OTHER_MODEL = '\0other';
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
+const IN_INPUT_BOX = 'with the handoff in the input box, to send when you are ready';
+
 /**
  * Asks which tool the new session runs in, then (for a CLI) its model and effort. Undefined when any step is cancelled.
- * A VS Code chat has its own model picker, so it takes no overrides.
+ * The chats have their own model pickers, so they take no overrides. The Claude Code chat is offered, next to its CLI,
+ * when the Claude Code extension is installed.
  */
-async function pickContinuation(session: SessionInfo): Promise<{ target: SessionSource; overrides: Overrides } | undefined> {
+async function pickContinuation(session: SessionInfo): Promise<{ target: ContinueTarget; overrides: Overrides } | undefined> {
   const title = 'Continue in New Session';
   const own = sourceOf(session);
-  const tools = [own, ...SOURCE_IDS.filter((id) => id !== own)].map((id) => ({
-    label: `$(${id === 'claude' ? 'sparkle' : SOURCES[id].icon}) ${SOURCES[id].label}`,
-    description: id === own ? 'same as this session' : undefined,
-    detail: id === 'vscode-chat' ? 'A new chat with the handoff in the input box, to send when you are ready' : undefined,
-    value: id,
-  }));
+  const claudeChat = !!vscode.extensions.getExtension(CLAUDE_CODE_EXTENSION);
+  const tools = [own, ...SOURCE_IDS.filter((id) => id !== own)].flatMap((id): ValuePick<ContinueTarget>[] => {
+    const pick: ValuePick<ContinueTarget> = {
+      label: `$(${id === 'claude' ? 'sparkle' : SOURCES[id].icon}) ${id === 'claude' && claudeChat ? 'Claude Code CLI' : SOURCES[id].label}`,
+      description: id === own ? 'same as this session' : undefined,
+      detail: id === 'vscode-chat' ? `A new chat ${IN_INPUT_BOX}` : id === 'claude' && claudeChat ? 'In a terminal' : undefined,
+      value: id,
+    };
+    if (id !== 'claude' || !claudeChat) {
+      return [pick];
+    }
+    return [
+      pick,
+      {
+        label: '$(comment-discussion) Claude Code Chat',
+        description: 'VS Code extension',
+        detail: `A new Claude Code tab ${IN_INPUT_BOX}`,
+        value: 'claude-chat',
+      },
+    ];
+  });
   const tool = await vscode.window.showQuickPick(tools, { title: `${title} (1/3): tool`, placeHolder: 'Where the new session runs' });
-  if (!tool) {
+  if (!tool?.value) {
     return undefined;
   }
   const target = tool.value;
-  if (target === 'vscode-chat') {
+  if (target === 'vscode-chat' || target === 'claude-chat') {
     return { target, overrides: {} };
   }
   const overrides = await pickOverrides(session, target, title);
