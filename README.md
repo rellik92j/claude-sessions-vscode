@@ -118,6 +118,8 @@ The other tools are optional. Their sessions are listed whenever their logs are 
 - **[GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli)**, so that `copilot` runs in a terminal, for Copilot CLI sessions.
 - The **GitHub Copilot Chat** extension, for opening VS Code chats and continuing work in a new chat.
 
+The **[Claude Code](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code)** extension is optional too. With it installed, **Open in Claude Code Chat** reopens a Claude Code session in the extension's chat tab, and **Continue in New Session with Tool or Model…** can continue any session in a new Claude Code chat tab instead of a terminal.
+
 To install it:
 
 1. In VS Code, open the Extensions view, search for **SessionsAI**, and click **Install**. Or install it from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=rellik92j.sessionsai), or from a terminal:
