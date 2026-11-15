@@ -39,7 +39,7 @@ function fakeVscode(state) {
     ViewColumn: { Active: -1, Beside: -2 },
     TerminalLocation: { Panel: 1 },
     ConfigurationTarget: { Global: 1 },
-    extensions: { getExtension: () => undefined, onDidChange: () => disposable },
+    extensions: { getExtension: (id) => state.extensions?.[id], onDidChange: () => disposable },
     env: { clipboard: { writeText: async () => {} }, openExternal: async () => {} },
     workspace: {
       workspaceFolders: [],
@@ -485,6 +485,29 @@ test('Copilot CLI and VS Code Chat sessions: source chips, filters, search, tran
     assert.equal(picks, 1);
     assert.match(chatOpens[1].query, /earlier Claude Code session/);
     assert.match(chatOpens[1].query, /## Claude's last reply|## My last request/);
+
+    // The Claude Code chat is offered only with the Claude Code extension, right after its CLI, and takes no model or
+    // effort; the handoff goes into a new tab's input box as the open command's second argument.
+    let tools;
+    state.pick = (items) => ((tools = items), undefined);
+    await state.commands['claudeSessions.continueInNewSessionWithModel'](copilotSession);
+    assert.ok(!tools.some((i) => i.value === 'claude-chat'));
+    state.extensions = { 'anthropic.claude-code': { extensionUri: { fsPath: root } } };
+    const claudeOpens = [];
+    state.commands['claude-vscode.editor.open'] = (...args) => claudeOpens.push(args);
+    picks = 0;
+    state.pick = (items) => ((tools = items), picks++, items.find((i) => i.value === 'claude-chat'));
+    await state.commands['claudeSessions.continueInNewSessionWithModel'](copilotSession);
+    assert.deepEqual(tools.map((i) => i.value), ['copilot-cli', 'claude', 'claude-chat', 'vscode-chat']);
+    assert.match(tools[1].label, /Claude Code CLI$/);
+    assert.equal(picks, 1);
+    assert.equal(state.terminals.length, 0, 'no terminal');
+    assert.equal(claudeOpens.length, 1);
+    const [sessionId, prompt] = claudeOpens[0];
+    assert.equal(sessionId, undefined, 'a new conversation, not a resumed one');
+    assert.match(prompt, /^I'm continuing work from an earlier GitHub Copilot CLI session/);
+    assert.match(prompt, /## Copilot's last reply\nHello!/);
+    state.extensions = undefined;
     assert.deepEqual(state.errors, []);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
