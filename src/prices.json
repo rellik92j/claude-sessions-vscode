@@ -185,5 +185,23 @@
     "cacheWrite5m": 12.5,
     "cacheWrite1h": 20,
     "context": 1000000
+  },
+  "mythos-5-2": {
+    "input": 8,
+    "output": 40,
+    "cacheRead": 0.2,
+    "cacheWrite5m": 10,
+    "cacheWrite1h": 16,
+    "context": 1000000,
+    "fast": true
+  },
+  "fable-5-2": {
+    "input": 8,
+    "output": 40,
+    "cacheRead": 0.2,
+    "cacheWrite5m": 10,
+    "cacheWrite1h": 16,
+    "context": 1000000,
+    "fast": true
   }
 }
