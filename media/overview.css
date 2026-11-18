@@ -43,6 +43,7 @@ h1 { margin: 0; font-size: 20px; font-weight: 600; }
 
 .segmented {
   display: inline-flex;
+  flex-wrap: wrap;
   padding: 2px;
   gap: 2px;
   border-radius: var(--radius);

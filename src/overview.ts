@@ -7,9 +7,9 @@ import { SessionInfo } from './sessionParser';
 import { NO_FOLDER, sessionFolder, sessionKey } from './sources';
 import { dayKey } from './usage';
 
-/** Days back from today, or 0 for all time. */
-export type OverviewRange = 7 | 30 | 90 | 0;
-export const OVERVIEW_RANGES: OverviewRange[] = [7, 30, 90, 0];
+/** The calendar week (from Monday) or month so far, days back from today, or 0 for all time. */
+export type OverviewRange = 'week' | 'month' | 7 | 30 | 90 | 0;
+export const OVERVIEW_RANGES: OverviewRange[] = ['week', 'month', 7, 30, 90, 0];
 
 /** All-time spans longer than this are charted by week instead of by day. */
 const MAX_DAILY_BARS = 120;
@@ -112,6 +112,18 @@ function startOfDay(time: number, daysBack = 0): Date {
   return d;
 }
 
+/** First day of any range but all time. */
+function rangeStart(range: Exclude<OverviewRange, 0>, now: number): Date {
+  if (range === 'week') {
+    // Weeks start on Monday; getDay() counts from Sunday.
+    return startOfDay(now, (new Date(now).getDay() + 6) % 7);
+  }
+  if (range === 'month') {
+    return startOfDay(now, new Date(now).getDate() - 1);
+  }
+  return startOfDay(now, range - 1);
+}
+
 /** Day keys from `from` to `to`, inclusive. */
 function daysBetween(from: string, to: string): string[] {
   const [y, m, d] = from.split('-').map(Number);
@@ -157,7 +169,7 @@ export function buildOverview(sessions: SessionInfo[], range: OverviewRange, now
 
   const to = dayKey(now);
   const activity = sessions.map((s) => ({ s, days: activeDays(s) }));
-  let from = range ? dayKey(startOfDay(now, range - 1).getTime()) : to;
+  let from = range ? dayKey(rangeStart(range, now).getTime()) : to;
   if (!range) {
     for (const { days } of activity) {
       for (const d of days) {
