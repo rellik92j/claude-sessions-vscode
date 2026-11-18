@@ -76,7 +76,7 @@ The numbers are worked out on your machine from the token counts in the session 
 
 ![The overview: totals, cost per day split by model, projects, models and recent sessions](docs/images/overview-page.png)
 
-Click the dashboard button at the top of the sidebar, or run **SessionsAI: Open Overview**, to open a summary in an editor tab. For the last 7, 30 or 90 days, or all time, it shows:
+Click the dashboard button at the top of the sidebar, or run **SessionsAI: Open Overview**, to open a summary in an editor tab. For the current week (from Monday) or month, the last 7, 30 or 90 days, or all time, it shows:
 
 - **Totals:** cost at API prices, sessions, prompts, projects and active days.
 - **Cost per day:** each bar is split by model or by project, whichever you pick under **Color by** (or **Total** for plain bars), with a legend below. Hover a bar for that day's breakdown. A model or project keeps its color when you change the range.

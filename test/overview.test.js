@@ -72,6 +72,26 @@ test('overview: range splits a long session, totals, projects, models and top se
   close(all.buckets.reduce((n, b) => n + b.cost, 0), all.totals.cost);
 });
 
+test('overview: current week starts on Monday, current month on the 1st', () => {
+  // `now` is Monday 2026-10-05.
+  const sessions = [session('a', '/repo', [0, 1, 4, 6]), session('b', '/repo', [40])];
+  const week = buildOverview(sessions, 'week', now);
+  assert.equal(week.from, dayKey(now));
+  assert.equal(week.buckets.length, 1);
+  close(week.totals.cost, 4);
+
+  const sunday = now - DAY;
+  const lastWeek = buildOverview(sessions, 'week', sunday);
+  assert.equal(lastWeek.from, dayKey(now - 7 * DAY), 'a Sunday belongs to the week that began the Monday before');
+  assert.equal(lastWeek.buckets.length, 7);
+
+  const month = buildOverview(sessions, 'month', now);
+  assert.equal(month.from, '2026-10-01');
+  assert.equal(month.buckets.length, 5);
+  close(month.totals.cost, 4 * 3);
+  assert.equal(month.totals.sessions, 1);
+});
+
 test('overview: nothing to show', () => {
   const o = buildOverview([], 0, now);
   assert.equal(o.totals.sessions, 0);

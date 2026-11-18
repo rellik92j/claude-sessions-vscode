@@ -3,6 +3,8 @@
   const vscode = acquireVsCodeApi();
   const saved = vscode.getState() || {};
   let range = saved.range ?? 30;
+  /** A range button's value: a number of days (0 for all time), or 'week' / 'month'. */
+  const rangeValue = (v) => (/^\d+$/.test(v) ? Number(v) : v);
   /** Which projects are shown: those in the open workspace folders (the default), all, or a pick. */
   let scope = ['workspace', 'all', 'pick'].includes(saved.scope) ? saved.scope : 'workspace';
   /** Keys of the picked projects, for the 'pick' scope. */
@@ -17,6 +19,8 @@
   let state = null;
 
   const RANGES = [
+    ['week', 'Current week'],
+    ['month', 'Current month'],
     [7, '7 days'],
     [30, '30 days'],
     [90, '90 days'],
@@ -454,7 +458,7 @@
 
   function render() {
     for (const b of document.querySelectorAll('[data-range]')) {
-      const on = Number(b.dataset.range) === range;
+      const on = rangeValue(b.dataset.range) === range;
       b.classList.toggle('active', on);
       b.setAttribute('aria-checked', String(on));
     }
@@ -551,7 +555,7 @@
     }
     const rangeBtn = e.target.closest('[data-range]');
     if (rangeBtn) {
-      range = Number(rangeBtn.dataset.range);
+      range = rangeValue(rangeBtn.dataset.range);
       save();
       render();
       postFilters();
