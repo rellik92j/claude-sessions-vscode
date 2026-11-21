@@ -19,7 +19,7 @@
     <header class="toolbar">
       <label class="search">
         <i class="codicon codicon-search"></i>
-        <input id="q" type="text" placeholder="Search sessions and transcripts" title="Search titles, prompts and transcripts. &quot;exact phrase&quot;, -word to exclude, a OR b for either." spellcheck="false" aria-label="Search sessions and transcripts" />
+        <input id="q" type="text" placeholder="Search sessions and transcripts" title="Search titles, prompts and transcripts. &quot;exact phrase&quot;, -word to exclude, a OR b for either. Claude Code sessions also take file:name (changed that file), skill:name, and has:commits, has:pr or has:edits." spellcheck="false" aria-label="Search sessions and transcripts" />
         <button class="icon-btn clear" id="clear" title="Clear (Esc)" aria-label="Clear search"><i class="codicon codicon-close"></i></button>
       </label>
       <div class="controls">

@@ -1,11 +1,13 @@
+import { execFile } from 'child_process';
 import { randomBytes } from 'crypto';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { escapeHtml, formatDateTime, formatTokens, formatUsd } from './format';
+import { collectInsights, editsAsDiff, FileTouch, SessionInsights, TodoStatus } from './insights';
 import { renderMarkdown } from './markdown';
 import { projectName, projectPath, SessionModel } from './model';
-import { SessionInfo, TranscriptEntry, TranscriptPart } from './sessionParser';
+import { SessionInfo, TranscriptEntry, TranscriptPart, TurnStats } from './sessionParser';
 import { parseTranscriptFor } from './transcripts';
 import { isClaude, NO_FOLDER, sessionKey, SourceInfo, SOURCES, sourceOf } from './sources';
 import { UsageSummary } from './usage';
@@ -19,6 +21,8 @@ interface TranscriptTab {
   /** Search words to highlight, from the search that opened it. */
   highlight: string[];
   preview: boolean;
+  /** What the session did, as last rendered; the side panel's file actions look up edits here. */
+  insights?: SessionInsights;
 }
 
 /**
@@ -103,6 +107,42 @@ export class TranscriptPanels {
         case 'openPr':
           vscode.commands.executeCommand(`claudeSessions.${msg.command}`, tab.session);
           break;
+        case 'rename':
+          if (await vscode.commands.executeCommand<boolean>('claudeSessions.rename', tab.session)) {
+            tab.session = this.model.find(sessionKey(tab.session)) ?? tab.session;
+            this.render(tab);
+          }
+          break;
+        case 'openFile':
+          if (typeof msg.arg === 'string') {
+            openSessionFile(tab.session, msg.arg);
+          }
+          break;
+        case 'showCommit':
+          if (typeof msg.arg === 'string' && /^[0-9a-f]{7,40}$/.test(msg.arg)) {
+            showCommit(tab.session, msg.arg);
+          }
+          break;
+        case 'openUrl':
+          if (typeof msg.arg === 'string' && /^https?:\/\//.test(msg.arg)) {
+            vscode.env.openExternal(vscode.Uri.parse(msg.arg));
+          }
+          break;
+        case 'compareFile':
+        case 'showEdits': {
+          const file = tab.insights?.changed.find((f) => f.path === msg.arg);
+          if (file) {
+            if (msg.command === 'showEdits' || !(await compareWithBeforeSession(tab.session, file.path))) {
+              showSessionEdits(file);
+            }
+          }
+          break;
+        }
+        case 'searchSidebar':
+          if (typeof msg.arg === 'string') {
+            vscode.commands.executeCommand('claudeSessions.searchFor', msg.arg);
+          }
+          break;
         case 'copyText':
           if (typeof msg.text === 'string') {
             await vscode.env.clipboard.writeText(msg.text);
@@ -158,6 +198,9 @@ export class TranscriptPanels {
       vscode.window.showErrorMessage(`Could not read session log: ${(err as Error).message}`);
       return;
     }
+    const insights = collectInsights(entries);
+    await resolveQuietCommits(session, insights);
+    tab.insights = insights;
     const showThinking = vscode.workspace.getConfiguration('claudeSessions').get<boolean>('showThinking', false);
     const webview = panel.webview;
     panel.title = session.title;
@@ -165,6 +208,7 @@ export class TranscriptPanels {
       showThinking,
       highlight: tab.highlight,
       preview: tab.preview,
+      insights,
       hasClaudeCode: this.hasClaudeCode(),
       cspSource: webview.cspSource,
       codiconCss: webview.asWebviewUri(vscode.Uri.joinPath(this.codiconsUri, 'codicon.css')).toString(),
@@ -174,8 +218,145 @@ export class TranscriptPanels {
   }
 }
 
+/**
+ * Looks up commits made with `git commit -q`, which print no hash, in the session's repository: a commit with the
+ * same subject made while the session ran. Leaves the insights alone when there is no repository or git.
+ */
+function resolveQuietCommits(session: SessionInfo, insights: SessionInsights): Promise<void> {
+  const cwd = projectPath(session);
+  if (!insights.unresolvedCommits.length || !cwd || session.startTime === undefined) {
+    return Promise.resolve();
+  }
+  const hour = 3_600_000;
+  const since = new Date(session.startTime - hour).toISOString();
+  const until = new Date((session.lastTime ?? Date.now()) + hour).toISOString();
+  const args = ['log', '--all', `--since=${since}`, `--until=${until}`, '--format=%H%x1f%s'];
+  return new Promise((resolve) => {
+    execFile('git', args, { cwd, timeout: 5000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
+      if (!err) {
+        const wanted = new Set(insights.unresolvedCommits);
+        const known = new Set(insights.commits.map((c) => c.hash));
+        // git log lists newest first; the session's commits read oldest first.
+        for (const line of stdout.split(/\r?\n/).reverse()) {
+          const [hash, subject] = line.split('\x1f');
+          if (hash && subject && wanted.has(subject) && !known.has(hash)) {
+            insights.commits.push({ hash, subject, branch: session.gitBranch ?? '' });
+            wanted.delete(subject);
+          }
+        }
+        insights.unresolvedCommits = [...wanted];
+      }
+      resolve();
+    });
+  });
+}
+
+const GIT_SCHEME = 'sessionsai-git';
+
+function git(args: string[], cwd: string): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    execFile('git', args, { cwd, timeout: 10_000, maxBuffer: 50 * 1024 * 1024 }, (err, stdout) => resolve(err ? undefined : stdout));
+  });
+}
+
+/**
+ * Serves a file as it was at a commit, for the left side of "compare with before the session". A file that didn't
+ * exist then reads as empty. The query holds the repository root, the commit and the path inside the repository.
+ */
+export function registerGitContentProvider(): vscode.Disposable {
+  return vscode.workspace.registerTextDocumentContentProvider(GIT_SCHEME, {
+    async provideTextDocumentContent(uri) {
+      try {
+        const { root, rev, rel } = JSON.parse(uri.query) as { root: string; rev: string; rel: string };
+        return rev ? ((await git(['show', `${rev}:${rel}`], root)) ?? '') : '';
+      } catch {
+        return '';
+      }
+    },
+  });
+}
+
+/** Full path of a file the session named; relative paths are taken from the session's folder. */
+function resolveSessionPath(session: SessionInfo, file: string): string {
+  const cwd = projectPath(session);
+  return path.isAbsolute(file) || !cwd ? file : path.join(cwd, file);
+}
+
+/**
+ * Opens a diff of the file as it was when the session started (the last commit before it, in the file's repository)
+ * against the file now. False when the file isn't in a git repository, so the caller can fall back.
+ */
+async function compareWithBeforeSession(session: SessionInfo, file: string): Promise<boolean> {
+  const full = resolveSessionPath(session, file);
+  let dir = path.dirname(full);
+  // The folder may be gone; look for the repository from the nearest folder that exists.
+  while (!(await fs.stat(dir).then((s) => s.isDirectory(), () => false))) {
+    const up = path.dirname(dir);
+    if (up === dir) {
+      return false;
+    }
+    dir = up;
+  }
+  const root = (await git(['rev-parse', '--show-toplevel'], dir))?.trim();
+  if (!root || session.startTime === undefined) {
+    return false;
+  }
+  const rev = (await git(['rev-list', '-1', `--before=${new Date(session.startTime).toISOString()}`, 'HEAD'], root))?.trim() ?? '';
+  const rel = path.relative(root, full).split(path.sep).join('/');
+  const name = path.basename(full);
+  const left = vscode.Uri.from({ scheme: GIT_SCHEME, path: `/${rel}`, query: JSON.stringify({ root, rev, rel }) });
+  const exists = await fs.access(full).then(() => true, () => false);
+  // A file deleted since shows as removed: an empty right side.
+  const right = exists ? vscode.Uri.file(full) : vscode.Uri.from({ scheme: GIT_SCHEME, path: `/${rel}`, query: JSON.stringify({ root, rev: '', rel }) });
+  const when = rev ? `at ${rev.slice(0, 7)}, before the session` : 'before the session (no commit yet)';
+  await vscode.commands.executeCommand('vscode.diff', left, right, `${name} (${when}) ↔ ${exists ? 'now' : 'deleted'}`);
+  return true;
+}
+
+/** The session's own edits of a file as a diff document; also the fallback when there is no repository. */
+async function showSessionEdits(file: FileTouch): Promise<void> {
+  if (!file.edits?.length && !file.written) {
+    vscode.window.showInformationMessage('The log has no edits recorded for this file.');
+    return;
+  }
+  const doc = await vscode.workspace.openTextDocument({ content: editsAsDiff(file), language: 'diff' });
+  await vscode.window.showTextDocument(doc, { preview: true });
+}
+
+/** A file the session touched; relative paths are taken from the session's folder. */
+async function openSessionFile(session: SessionInfo, file: string): Promise<void> {
+  const cwd = projectPath(session);
+  const full = path.isAbsolute(file) || !cwd ? file : path.join(cwd, file);
+  try {
+    await fs.access(full);
+  } catch {
+    vscode.window.showInformationMessage(`${full} no longer exists.`);
+    return;
+  }
+  await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(full));
+}
+
+/** `git show` of a commit the session made, run in the session's folder, opened as a read-only diff. */
+function showCommit(session: SessionInfo, hash: string): void {
+  const cwd = projectPath(session);
+  if (!cwd) {
+    vscode.window.showInformationMessage('This session has no folder to look the commit up in.');
+    return;
+  }
+  execFile('git', ['show', '--stat', '--patch', '--format=fuller', hash], { cwd, maxBuffer: 20 * 1024 * 1024 }, async (err, stdout, stderr) => {
+    if (err) {
+      vscode.window.showInformationMessage(`Could not show commit ${hash} in ${cwd}: ${(stderr || err.message).trim()}`);
+      return;
+    }
+    const doc = await vscode.workspace.openTextDocument({ content: stdout, language: 'diff' });
+    vscode.window.showTextDocument(doc, { preview: true });
+  });
+}
+
 interface HtmlOptions {
   showThinking: boolean;
+  /** What the session did, for the side panel; collected from `entries` when omitted. */
+  insights?: SessionInsights;
   /** Search words for transcript.js to mark. */
   highlight?: string[];
   /** Shown in the shared preview tab: offer "Keep open". */
@@ -357,7 +538,17 @@ function assistantMark(source: SourceInfo): string {
   return source.id === 'claude' ? CLAUDE_MARK : `<i class="codicon codicon-${source.icon}"></i>`;
 }
 
-function renderEntry(e: TranscriptEntry, showThinking: boolean, source: SourceInfo): string {
+/** What answering a prompt cost and took, beside the prompt. */
+function turnChip(t: TurnStats | undefined): string {
+  if (!t) {
+    return '';
+  }
+  const took = t.durationMs !== undefined ? formatDuration(t.durationMs) : '';
+  const title = `Answering this prompt: ${t.requests} request${t.requests === 1 ? '' : 's'}, ${formatTokens(t.outputTokens)} output tokens${took ? `, ${took}` : ''}. Subagents not included.`;
+  return `<span class="turn-chip" title="${escapeHtml(title)}"><i class="codicon codicon-credit-card"></i>${formatUsd(t.cost)}${took ? ` · ${took}` : ''}</span>`;
+}
+
+function renderEntry(e: TranscriptEntry, showThinking: boolean, source: SourceInfo, index: number): string {
   if (e.role === 'system') {
     const text = e.parts.map((p) => ('text' in p ? p.text : '')).join(' ');
     return `<div class="divider system"><span><i class="codicon codicon-fold"></i>${escapeHtml(text)}</span></div>`;
@@ -365,7 +556,7 @@ function renderEntry(e: TranscriptEntry, showThinking: boolean, source: SourceIn
   if (e.role === 'user') {
     const body = renderParts(e.parts, 'user', showThinking);
     return body
-      ? `<div class="msg user"><div class="msg-meta">You ${time(e.timestamp)}</div><div class="bubble">${body}</div></div>`
+      ? `<div class="msg user" id="msg-${index}"><div class="msg-meta">${turnChip(e.turn)}You ${time(e.timestamp)}</div><div class="bubble">${body}</div></div>`
       : '';
   }
   if (e.role === 'peer') {
@@ -501,6 +692,182 @@ function renderStatsStrip(session: SessionInfo, toolCount: number): string {
   return `<div class="topbar-stats"><button class="strip-stats" id="to-top" title="Back to the top">${items.join('')}</button>${toggle}</div>`;
 }
 
+const TODO_ICONS: Record<TodoStatus, string> = { done: 'pass-filled', active: 'circle-large-filled', pending: 'circle-large-outline' };
+const TODO_LABELS: Record<TodoStatus, string> = { done: 'Done', active: 'In progress', pending: 'Not started' };
+
+/** A sidebar search for a file or skill; the filters take no spaces, so such a name is searched as a phrase instead. */
+function searchValue(field: 'file' | 'skill', value: string): string {
+  return /\s/.test(value) ? `"${value}"` : `${field}:${value}`;
+}
+
+/** "45s", "4m", "1h 20m". */
+function formatDuration(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s < 60) {
+    return `${s}s`;
+  }
+  const m = Math.round(s / 60);
+  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+/** How many rows a side panel section shows before "Show N more". */
+const SIDE_ROWS = 8;
+
+/** A path shown relative to the session's folder when it is inside it. */
+function shortPath(file: string, cwd: string): string {
+  if (cwd && path.isAbsolute(file)) {
+    const rel = path.relative(cwd, file);
+    if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) {
+      return rel.replace(/\\/g, '/');
+    }
+  }
+  return file.replace(/\\/g, '/');
+}
+
+/** A collapsible side panel section; rows past SIDE_ROWS hide behind a "Show more" toggle (transcript.js). */
+function sideSection(id: string, icon: string, title: string, rows: string[], open = true): string {
+  if (!rows.length) {
+    return '';
+  }
+  const more = rows.length > SIDE_ROWS ? `<button class="side-more" data-more>Show ${rows.length - SIDE_ROWS} more</button>` : '';
+  return `
+    <details class="side-section" data-section="${id}"${open ? ' open' : ''}>
+      <summary><i class="codicon codicon-${icon}"></i><span>${title}</span><span class="side-count">${rows.length}</span></summary>
+      <ul class="side-list">${rows.map((r, i) => (i < SIDE_ROWS ? r : r.replace('<li', '<li hidden data-extra'))).join('')}</ul>
+      ${more}
+    </details>`;
+}
+
+const countBadge = (n: number) => (n > 1 ? `<span class="side-badge">×${n}</span>` : '');
+
+/**
+ * The session's side panel: what it changed and committed, what it used, and its prompts to jump between.
+ * Every list comes from the transcript, so it shows what the log records, not what is on disk now.
+ */
+function renderSide(ins: SessionInsights, cwd: string): string {
+  const fileRow = (f: FileTouch, changed: boolean) => {
+    const rel = shortPath(f.path, cwd);
+    const name = rel.split('/').pop() ?? rel;
+    const dir = rel.slice(0, rel.length - name.length).replace(/\/$/, '');
+    const arg = escapeHtml(f.path);
+    // Changed files can be compared with how they were before the session, show just the session's edits, or find
+    // the other sessions that changed them.
+    const actions = changed
+      ? `<span class="side-actions">` +
+        `<button class="icon-btn" data-cmd="compareFile" data-arg="${arg}" title="Compare with before the session"><i class="codicon codicon-git-compare"></i></button>` +
+        (f.edits?.length
+          ? `<button class="icon-btn" data-cmd="showEdits" data-arg="${arg}" title="Show this session's edits"><i class="codicon codicon-diff"></i></button>`
+          : '') +
+        `<button class="icon-btn" data-cmd="searchSidebar" data-arg="${escapeHtml(searchValue('file', name))}" title="Find sessions that changed ${escapeHtml(name)}"><i class="codicon codicon-search"></i></button>` +
+        `</span>`
+      : '';
+    return `<li class="has-actions"><button class="side-row" data-cmd="openFile" data-arg="${arg}" title="Open ${arg}"><span class="side-main">${escapeHtml(name)}${f.written ? '<span class="side-tag">new</span>' : ''}</span><span class="side-sub">${escapeHtml(dir)}</span>${countBadge(f.count)}</button>${actions}</li>`;
+  };
+  const named = (n: { name: string; count: number }) =>
+    `<li><div class="side-row static"><span class="side-main">${escapeHtml(n.name)}</span>${countBadge(n.count)}</div></li>`;
+  const maxCost = Math.max(0, ...ins.prompts.map((p) => p.turn?.cost ?? 0));
+  const promptRow = (p: SessionInsights['prompts'][number], i: number) => {
+    const t = p.turn;
+    const took = t?.durationMs !== undefined ? formatDuration(t.durationMs) : '';
+    const stats = t
+      ? `<span class="side-cost" title="${t.requests} request${t.requests === 1 ? '' : 's'}, ${formatTokens(t.outputTokens)} output tokens${took ? `, took ${took}` : ''}">${formatUsd(t.cost)}${took ? `<span> · ${took}</span>` : ''}</span>`
+      : '';
+    const bar = t && maxCost > 0 ? `<span class="side-bar"><span data-fill="${(t.cost / maxCost).toFixed(4)}"></span></span>` : '';
+    const text = escapeHtml(p.text.replace(/\s+/g, ' ').slice(0, 140));
+    return `<li><a class="side-row prompt" href="#msg-${p.index}" data-jump="msg-${p.index}"><span class="side-num">${i + 1}</span><span class="side-main">${text}</span>${stats}${bar}</a></li>`;
+  };
+
+  const sections = [
+    sideSection('changed', 'diff-multiple', 'Files changed', ins.changed.map((f) => fileRow(f, true))),
+    sideSection(
+      'commits',
+      'git-commit',
+      'Commits',
+      ins.commits.map(
+        (c) =>
+          `<li><button class="side-row" data-cmd="showCommit" data-arg="${escapeHtml(c.hash)}" title="Show commit ${escapeHtml(c.hash)}"><span class="side-main">${escapeHtml(c.subject)}</span><span class="side-sub"><code>${escapeHtml(c.hash.slice(0, 7))}</code>${c.branch ? ` · ${escapeHtml(c.branch)}` : ''}</span></button></li>`,
+      ).concat(
+        ins.unresolvedCommits.map(
+          (subject) =>
+            `<li><div class="side-row static" title="Committed quietly (git commit -q) and not found in the session's repository"><span class="side-main">${escapeHtml(subject)}</span><span class="side-sub">hash not recorded</span></div></li>`,
+        ),
+      ),
+    ),
+    sideSection(
+      'prs',
+      'git-pull-request',
+      'Pull requests',
+      ins.pullRequests.map((url) => {
+        const m = /github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/.exec(url);
+        return `<li><button class="side-row" data-cmd="openUrl" data-arg="${escapeHtml(url)}" title="${escapeHtml(url)}"><span class="side-main">${escapeHtml(m ? `${m[1]}#${m[2]}` : url)}</span></button></li>`;
+      }),
+    ),
+    sideSection(
+      'todos',
+      'checklist',
+      `To-dos <span class="side-progress">${ins.todos.filter((t) => t.status === 'done').length} of ${ins.todos.length} done</span>`,
+      ins.todos.map(
+        (t) =>
+          `<li><div class="side-row static todo ${t.status}"><i class="codicon codicon-${TODO_ICONS[t.status]}" title="${TODO_LABELS[t.status]}"></i><span class="side-main">${escapeHtml(t.text)}</span></div></li>`,
+      ),
+    ),
+    sideSection(
+      'skills',
+      'sparkle',
+      'Skills',
+      ins.skills.map(
+        (n) =>
+          `<li><button class="side-row" data-cmd="searchSidebar" data-arg="${escapeHtml(searchValue('skill', n.name))}" title="Find sessions that used ${escapeHtml(n.name)}"><span class="side-main">${escapeHtml(n.name)}</span>${countBadge(n.count)}</button></li>`,
+      ),
+    ),
+    sideSection('commands', 'terminal', 'Slash commands', ins.commands.map(named)),
+    sideSection(
+      'agents',
+      'hubot',
+      'Subagents',
+      ins.subagents.map(
+        (a) =>
+          `<li><div class="side-row static"><span class="side-main">${escapeHtml(a.description || a.type)}</span><span class="side-sub">${escapeHtml(a.type)}</span></div></li>`,
+      ),
+    ),
+    sideSection('mcp', 'plug', 'MCP servers', ins.mcpServers.map(named)),
+    sideSection(
+      'web',
+      'globe',
+      'Web',
+      ins.web.map((w) =>
+        w.kind === 'fetch'
+          ? `<li><button class="side-row" data-cmd="openUrl" data-arg="${escapeHtml(w.text)}" title="${escapeHtml(w.text)}"><span class="side-main">${escapeHtml(w.text.replace(/^https?:\/\//, ''))}</span></button></li>`
+          : `<li><div class="side-row static"><span class="side-main"><i class="codicon codicon-search"></i> ${escapeHtml(w.text)}</span></div></li>`,
+      ),
+      false,
+    ),
+    sideSection('read', 'file', 'Files read', ins.read.map((f) => fileRow(f, false)), false),
+    sideSection(
+      'tools',
+      'tools',
+      ins.failedTools ? `Tools <span class="side-failed">· ${ins.failedTools} failed</span>` : 'Tools',
+      ins.tools.map(
+        (t) =>
+          `<li><div class="side-row static"><span class="side-main">${escapeHtml(toolLabel(t.name))}</span>${t.failed ? `<span class="side-failed">${t.failed} failed</span>` : ''}${countBadge(t.count)}</div></li>`,
+      ),
+      false,
+    ),
+    sideSection(
+      'prompts',
+      'list-ordered',
+      'Prompts',
+      ins.prompts.map(promptRow),
+    ),
+  ].filter(Boolean);
+
+  return `
+<aside class="side" id="side" aria-label="Session details">
+  <div class="side-head"><span>Session details</span><button class="icon-btn" id="side-close" title="Close" aria-label="Close session details"><i class="codicon codicon-close"></i></button></div>
+  ${sections.join('') || '<p class="side-empty">Nothing recorded yet: no files, commits, skills or tools.</p>'}
+</aside>`;
+}
+
 export function buildHtml(session: SessionInfo, entries: TranscriptEntry[], o: HtmlOptions): string {
   const nonce = randomBytes(16).toString('base64');
   const proj = projectPath(session);
@@ -523,13 +890,13 @@ export function buildHtml(session: SessionInfo, entries: TranscriptEntry[], o: H
 
   const body: string[] = [];
   let lastDay: string | undefined;
-  for (const e of entries) {
+  for (const [index, e] of entries.entries()) {
     const day = dayKey(e.timestamp);
     if (day && day !== lastDay && e.timestamp) {
       body.push(`<div class="divider day"><span>${escapeHtml(dayLabel(e.timestamp))}</span></div>`);
       lastDay = day;
     }
-    body.push(renderEntry(e, o.showThinking, source));
+    body.push(renderEntry(e, o.showThinking, source, index));
   }
   const conversation = body.filter(Boolean).join('\n');
   const toolCount = entries.reduce((n, e) => n + e.parts.filter((p) => p.kind === 'tool_use').length, 0);
@@ -553,9 +920,11 @@ export function buildHtml(session: SessionInfo, entries: TranscriptEntry[], o: H
     <button class="icon-btn" data-cmd="continueInNewSessionWithModel" title="Continue in another tool, or with a different model or effort…"><i class="codicon codicon-chevron-down"></i></button>
     ${claude && o.hasClaudeCode ? '<button class="btn" data-cmd="openInClaudeCode" title="Open in the Claude Code chat"><i class="codicon codicon-comment-discussion"></i><span>Open in chat</span></button>' : ''}
     ${o.preview ? '<button class="btn" data-cmd="keepOpen" title="This tab is reused for the next transcript you open. Keep this one in its own tab."><i class="codicon codicon-pinned"></i><span>Keep open</span></button>' : ''}
+    ${claude ? '<button class="icon-btn" data-cmd="rename" title="Rename session"><i class="codicon codicon-edit"></i></button>' : ''}
     <button class="icon-btn" data-cmd="refresh" title="Reload"><i class="codicon codicon-refresh"></i></button>
     <button class="icon-btn" data-cmd="copyId" title="Copy session ID"><i class="codicon codicon-copy"></i></button>
     <button class="icon-btn" data-cmd="openRawFile" title="Open the raw session log"><i class="codicon codicon-json"></i></button>
+    <button class="icon-btn" id="side-toggle" title="Session details" aria-controls="side" aria-expanded="false"><i class="codicon codicon-layout-sidebar-right"></i></button>
   </div>
   ${renderStatsStrip(session, toolCount)}
 </nav>
@@ -572,6 +941,7 @@ export function buildHtml(session: SessionInfo, entries: TranscriptEntry[], o: H
 <main class="conversation">
 ${conversation || '<div class="empty"><i class="codicon codicon-comment-discussion"></i><p>This session has no messages yet.</p></div>'}
 </main>
+${renderSide(o.insights ?? collectInsights(entries), proj)}
 <button class="fab" id="jump" title="Jump to latest"><i class="codicon codicon-arrow-down"></i></button>
 <script nonce="${nonce}" src="${o.js}"></script>
 </body>

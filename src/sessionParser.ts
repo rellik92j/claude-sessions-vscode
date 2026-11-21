@@ -1,6 +1,7 @@
 // Pure parsing of Claude Code session logs (~/.claude/projects/<project>/<sessionId>.jsonl).
 // No VS Code imports here so it can be unit-tested with plain Node.
 
+import { fileAccess, filePathOf, isCommitCommand, isShellTool } from './tools';
 import { UsageCollector, UsageSummary } from './usage';
 
 export type TitleSource = 'custom' | 'ai' | 'prompt' | 'command' | 'none';
@@ -43,6 +44,12 @@ export interface SessionInfo {
   searchText: string;
   /** Tokens, cost, context and cache state; undefined when the log records no API usage. */
   usage?: UsageSummary;
+  /** Files its tools wrote or edited, for the `file:` search filter (Claude Code only). */
+  changedFiles?: string[];
+  /** Skills it loaded, for the `skill:` search filter (Claude Code only). */
+  skills?: string[];
+  /** Successful `git commit` runs, for `has:commits` (Claude Code only). */
+  commitCount?: number;
 }
 
 export type TranscriptPart =
@@ -55,16 +62,29 @@ export type TranscriptPart =
       /** Most telling input field (description, command, path…) for a one-line summary. */
       hint?: string;
       input: string;
+      /** The input's short string fields (paths, commands, skill names…), for the insights sidebar. */
+      args?: Record<string, string>;
       /** For edit-style tools: the replaced and replacement text. */
       diff?: { before: string; after: string };
       result?: { text: string; isError: boolean };
     }
   | { kind: 'tool_result'; text: string; isError: boolean };
 
+/** What answering one prompt took: every request until the next prompt (subagents not included). */
+export interface TurnStats {
+  cost: number;
+  requests: number;
+  outputTokens: number;
+  /** From the prompt to the last reply before the next prompt. */
+  durationMs?: number;
+}
+
 export interface TranscriptEntry {
   role: 'user' | 'assistant' | 'tool' | 'system' | 'peer';
   timestamp?: string;
   parts: TranscriptPart[];
+  /** On a user prompt: what the reply to it cost (Claude Code only). */
+  turn?: TurnStats;
 }
 
 const MAX_TITLE = 120;
@@ -208,6 +228,11 @@ export function parseSession(
   let firstCommand: string | undefined;
   let lastPromptRecord: string | undefined;
   const assistantIds = new Set<string>();
+  const changedFiles = new Set<string>();
+  const skills = new Set<string>();
+  /** Ids of `git commit` tool calls, counted once their result comes back without an error. */
+  const commitCalls = new Set<string>();
+  let commitCount = 0;
   const usage = new UsageCollector();
 
   for (const r of records(text)) {
@@ -298,12 +323,31 @@ export function parseSession(
                 searchParts.push(p.input[key]);
               }
             }
+            const name = String(p.name ?? '');
+            const access = fileAccess(name, p.input);
+            const file = access && access !== 'read' ? filePathOf(p.input) : undefined;
+            if (file) {
+              changedFiles.add(file);
+            }
+            if (name === 'Skill' && typeof p.input.skill === 'string') {
+              skills.add(p.input.skill);
+            }
+            if (isShellTool(name) && typeof p.input.command === 'string' && isCommitCommand(p.input.command) && typeof p.id === 'string') {
+              commitCalls.add(p.id);
+            }
           }
         }
       }
       continue;
     }
 
+    if (commitCalls.size && Array.isArray(r.message?.content)) {
+      for (const p of r.message.content) {
+        if (p?.type === 'tool_result' && commitCalls.delete(p.tool_use_id) && !p.is_error) {
+          commitCount++;
+        }
+      }
+    }
     if (r.isMeta) {
       const peer = parsePeerMessage(r.message?.content);
       if (peer) {
@@ -337,6 +381,9 @@ export function parseSession(
   info.usage = usage.summary();
   info.assistantCount = assistantIds.size;
   info.searchText = searchParts.join('\n');
+  info.changedFiles = [...changedFiles];
+  info.skills = [...skills];
+  info.commitCount = commitCount;
   if (!info.lastPrompt && lastPromptRecord) {
     info.lastPrompt = lastPromptRecord;
   }
@@ -403,6 +450,28 @@ export function toolHint(input: unknown): string | undefined {
   return undefined;
 }
 
+const MAX_ARG = 2000;
+
+/** The short top-level string fields of a tool's input; long ones (file contents, patches) are left out. */
+export function shortArgs(input: unknown): Record<string, string> | undefined {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return undefined;
+  }
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
+    if (typeof v === 'string' && v.length <= MAX_ARG) {
+      out[k] = v;
+    } else if (Array.isArray(v)) {
+      // Lists such as a todo list's items, as JSON.
+      const json = JSON.stringify(v);
+      if (json.length <= MAX_ARG * 4) {
+        out[k] = json;
+      }
+    }
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 export function truncate(text: string, max = MAX_TOOL_TEXT): string {
   return text.length > max ? text.slice(0, max) + `\n… (${text.length - max} more characters)` : text;
 }
@@ -412,10 +481,29 @@ export function parseTranscript(text: string): TranscriptEntry[] {
   const entries: TranscriptEntry[] = [];
   // tool_use parts by id, so results (logged later as user messages) can be attached to their call.
   const toolUses = new Map<string, Extract<TranscriptPart, { kind: 'tool_use' }>>();
+  // The prompt being answered, with the requests made since it, to give each prompt its cost.
+  let turn: { entry: TranscriptEntry; usage: UsageCollector; last?: number } | undefined;
+  const endTurn = () => {
+    const u = turn?.usage.summary();
+    if (turn && u) {
+      const start = parseTime(turn.entry.timestamp);
+      turn.entry.turn = {
+        cost: u.cost,
+        requests: u.requests,
+        outputTokens: u.tokens.output,
+        durationMs: start !== undefined && turn.last !== undefined && turn.last >= start ? turn.last - start : undefined,
+      };
+    }
+    turn = undefined;
+  };
 
   for (const r of records(text)) {
     if (!r || typeof r !== 'object' || r.isSidechain) {
       continue;
+    }
+    if (r.type === 'assistant' && turn) {
+      turn.usage.add(r, false);
+      turn.last = parseTime(r.timestamp) ?? turn.last;
     }
 
     if (r.type === 'system' && r.subtype === 'compact_boundary') {
@@ -441,6 +529,7 @@ export function parseTranscript(text: string): TranscriptEntry[] {
             name: String(p.name ?? 'tool'),
             hint: toolHint(p.input),
             input: truncate(JSON.stringify(p.input ?? {}, null, 2)),
+            args: shortArgs(p.input),
             diff:
               typeof p.input?.old_string === 'string' && typeof p.input?.new_string === 'string'
                 ? { before: truncate(p.input.old_string), after: truncate(p.input.new_string) }
@@ -504,8 +593,12 @@ export function parseTranscript(text: string): TranscriptEntry[] {
     if (c.kind === 'noise') {
       continue;
     }
-    entries.push({ role: 'user', timestamp: r.timestamp, parts: [{ kind: 'text', text: c.text }] });
+    const entry: TranscriptEntry = { role: 'user', timestamp: r.timestamp, parts: [{ kind: 'text', text: c.text }] };
+    entries.push(entry);
+    endTurn();
+    turn = { entry, usage: new UsageCollector() };
   }
+  endTurn();
   return entries;
 }
 

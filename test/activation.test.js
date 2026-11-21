@@ -51,6 +51,7 @@ function fakeVscode(state) {
       createFileSystemWatcher: () => ({ onDidCreate() {}, onDidChange() {}, onDidDelete() {}, dispose() {} }),
       onDidChangeConfiguration: () => disposable,
       onDidChangeWorkspaceFolders: () => disposable,
+      registerTextDocumentContentProvider: () => disposable,
     },
     window: {
       registerWebviewViewProvider: (id, provider) => ((state.providers[id] = provider), disposable),

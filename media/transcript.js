@@ -6,8 +6,26 @@
   document.addEventListener('click', (e) => {
     const cmd = e.target.closest('[data-cmd]');
     if (cmd) {
-      vscode.postMessage({ command: cmd.dataset.cmd });
+      vscode.postMessage({ command: cmd.dataset.cmd, arg: cmd.dataset.arg });
       return;
+    }
+    const jumpTo = e.target.closest('[data-jump]');
+    if (jumpTo) {
+      e.preventDefault();
+      const target = document.getElementById(jumpTo.dataset.jump);
+      if (target) {
+        target.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        target.classList.remove('flash');
+        void target.offsetWidth;
+        target.classList.add('flash');
+      }
+      if (window.innerWidth < SIDE_OVERLAY_WIDTH) setSide(false);
+      return;
+    }
+    const more = e.target.closest('[data-more]');
+    if (more) {
+      more.closest('.side-section').querySelectorAll('[data-extra]').forEach((li) => (li.hidden = false));
+      more.remove();
     }
     const copy = e.target.closest('.copy-code');
     if (copy) {
@@ -18,6 +36,36 @@
       setTimeout(() => icon.classList.replace('codicon-check', 'codicon-copy'), 1200);
     }
   });
+
+  // ---------- session details side panel ----------
+
+  /** Below this width the panel covers the conversation instead of sitting beside it, so it starts closed. */
+  const SIDE_OVERLAY_WIDTH = 1100;
+  const side = document.getElementById('side');
+  const sideToggle = document.getElementById('side-toggle');
+  function setSide(open, remember) {
+    document.body.classList.toggle('side-open', open);
+    sideToggle?.setAttribute('aria-expanded', String(open));
+    sideToggle?.classList.toggle('active', open);
+    if (remember) {
+      saved.sideOpen = open;
+      vscode.setState({ ...saved });
+    }
+  }
+  if (side && sideToggle) {
+    setSide(saved.sideOpen ?? window.innerWidth >= SIDE_OVERLAY_WIDTH);
+    sideToggle.addEventListener('click', () => setSide(!document.body.classList.contains('side-open'), true));
+    document.getElementById('side-close').addEventListener('click', () => setSide(false, true));
+    // Which sections are expanded survives reloads of the tab.
+    const sections = saved.sections || {};
+    side.querySelectorAll('details[data-section]').forEach((d) => {
+      if (d.dataset.section in sections) d.open = sections[d.dataset.section];
+      d.addEventListener('toggle', () => {
+        saved.sections = { ...(saved.sections || {}), [d.dataset.section]: d.open };
+        vscode.setState({ ...saved });
+      });
+    });
+  }
 
   // The hero and the sticky top bar each have a tool-call switch; they stay in step.
   const toggles = Array.from(document.querySelectorAll('[data-tools-toggle]'));
@@ -48,7 +96,7 @@
   // ---------- stats ----------
 
   // Widths are set here because the page's CSP doesn't allow inline style attributes.
-  document.querySelectorAll('.meter [data-fill]').forEach((el) => {
+  document.querySelectorAll('.meter [data-fill], .side-bar [data-fill]').forEach((el) => {
     el.style.width = `${Math.min(100, Number(el.dataset.fill) * 100)}%`;
   });
 

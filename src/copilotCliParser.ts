@@ -10,6 +10,7 @@ import {
   oneLine,
   parseTime,
   records,
+  shortArgs,
   toolHint,
   truncate,
 } from './sessionParser';
@@ -82,6 +83,7 @@ function toolUse(id: unknown, name: unknown, args: unknown): ToolUsePart {
     name: String(name ?? 'tool'),
     hint: toolHint(input),
     input: truncate(JSON.stringify(input, null, 2)),
+    args: shortArgs(input),
     diff:
       typeof input?.old_str === 'string' && typeof input?.new_str === 'string'
         ? { before: truncate(input.old_str), after: truncate(input.new_str) }

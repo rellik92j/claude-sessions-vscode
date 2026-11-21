@@ -18,6 +18,7 @@ Each card also shows what the session cost, plus a couple of [usage badges](#see
 - **Workspace** filter: show only the sessions started in the folders you have open in this window.
 - **Source chips** under the search box filter by tool (Claude Code, Copilot CLI, VS Code Chat). See [below](#github-copilot-cli-and-vs-code-chat-sessions-too).
 - Hover a card for quick actions: resume, continue in a new session, open in Claude Code chat, read the transcript, or copy the session ID. Right-click for more.
+- **Rename** a Claude Code session from its right-click menu or the pencil in its transcript. It's the same as `/rename` inside Claude Code, so the new name shows up there and in the Claude Code extension too.
 
 The sidebar refreshes on its own as sessions change, and everything follows your VS Code color theme.
 
@@ -36,6 +37,9 @@ To find the sessions that worked on a file, right-click it in the Explorer or ri
 | `-flaky` or `-"some phrase"` | sessions that *don't* contain it |
 | `redis OR postgres` | sessions containing either word |
 | `source:copilot` or `-source:chat` | sessions from one tool, or all but one (`claude`, `copilot`, `chat`) |
+| `file:auth.ts` | Claude Code sessions that changed a file whose path contains `auth.ts` (`file:src/auth` works too) |
+| `skill:ship` | Claude Code sessions that loaded a skill whose name contains `ship` |
+| `has:commits`, `has:pr`, `has:edits` | Claude Code sessions that made a commit, opened a pull request or changed files; `-has:…` for the opposite |
 
 ### Read a session as a chat
 
@@ -46,6 +50,9 @@ Click a session to open its transcript. Your prompts are on the right and Claude
 - Each tool call is a compact row with a ✓ or ✗. Click it to see the input and output. File edits show as a red/green diff.
 - Hide tool calls to read just the conversation, or jump straight to the latest message.
 - If you opened the transcript from a search, your search words are highlighted and it starts at the first match. Step through matches with F3 / Shift+F3.
+- The **Session details** panel (the sidebar button at the top right) lists what the session did: files changed, commits (click for the diff), pull requests, its to-do list as it left it, skills and slash commands, subagents, MCP servers, web lookups, files read, tool calls with failures, and every prompt so you can jump between them.
+- Hover a changed file to compare it with how it was before the session (the last commit before the session started, against the file now), see only the session's own edits, or find the other sessions that changed it. Click a skill to find the other sessions that used it.
+- Each prompt shows what Claude's reply to it cost at API prices and how long it took, beside the prompt and in the panel's prompt list, with a bar against the costliest one.
 - Transcripts open in a single preview tab that the next one replaces, so tabs don't pile up. Double-click a session, or click **Keep open**, to give it a tab of its own.
 
 ### See what a session used and cost
@@ -138,7 +145,7 @@ Each release's `.vsix` is also on the [Releases page](https://github.com/rellik9
 
 ## Privacy
 
-SessionsAI only reads the session logs that are already on your machine: Claude Code's in `~/.claude/projects` (or `$CLAUDE_CONFIG_DIR/projects` if you set it), GitHub Copilot CLI's in `~/.copilot/session-state`, and VS Code Chat's in VS Code's `workspaceStorage` folder. It sends nothing over the network, and it never changes or deletes your logs.
+SessionsAI only reads the session logs that are already on your machine: Claude Code's in `~/.claude/projects` (or `$CLAUDE_CONFIG_DIR/projects` if you set it), GitHub Copilot CLI's in `~/.copilot/session-state`, and VS Code Chat's in VS Code's `workspaceStorage` folder. It sends nothing over the network and never deletes your logs. The one thing it writes is a rename: renaming a Claude Code session appends one line to that session's log, exactly as Claude Code's `/rename` does.
 
 ## Keyboard shortcuts
 
@@ -199,10 +206,11 @@ How the code is laid out:
 | `src/model.ts`, `src/query.ts` | Loaded sessions, grouping and filters, and the search syntax |
 | `src/sidebarView.ts`, `media/sidebar.*` | The sidebar webview |
 | `src/transcriptPanel.ts`, `src/markdown.ts`, `media/transcript.*` | Transcript tabs |
+| `src/insights.ts` | What a session did, for the transcript's Session details panel |
 | `src/overview.ts`, `src/overviewPanel.ts`, `media/overview.*` | The overview tab: `overview.ts` builds the numbers, the panel picks the projects |
 | `src/handoff.ts` | The prompt that starts Continue in New Session |
 
-Files without VS Code imports (the three parsers, `usage`, `query`, `overview`, `handoff`, `markdown`, `format`) are unit tested directly from `out/`; `test/activation.test.js` loads the bundled extension against a fake VS Code API and drives the webviews' messages.
+Files without VS Code imports (the three parsers, `usage`, `query`, `overview`, `handoff`, `insights`, `markdown`, `format`) are unit tested directly from `out/`; `test/activation.test.js` loads the bundled extension against a fake VS Code API and drives the webviews' messages.
 
 ## License
 

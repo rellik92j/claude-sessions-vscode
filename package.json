@@ -2,7 +2,7 @@
   "name": "sessionsai",
   "displayName": "SessionsAI — Claude Code, Copilot, & VS Code Chat Manager",
   "description": "Browse, search, read and resume your Claude Code, GitHub Copilot CLI and VS Code Chat sessions from the VS Code sidebar.",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "publisher": "rellik92j",
   "icon": "media/icon.png",
   "license": "MIT",
@@ -111,6 +111,12 @@
         "icon": "$(pinned)"
       },
       {
+        "command": "claudeSessions.rename",
+        "title": "Rename Session…",
+        "category": "SessionsAI",
+        "icon": "$(edit)"
+      },
+      {
         "command": "claudeSessions.openRawFile",
         "title": "Open Raw Log",
         "category": "SessionsAI"
@@ -141,6 +147,11 @@
         "title": "Focus Session Search",
         "category": "SessionsAI",
         "icon": "$(search)"
+      },
+      {
+        "command": "claudeSessions.searchFor",
+        "title": "Search Sessions For…",
+        "category": "SessionsAI"
       },
       {
         "command": "claudeSessions.searchForFile",
@@ -241,6 +252,10 @@
         {
           "command": "claudeSessions.searchForFile",
           "when": "resourceFilename"
+        },
+        {
+          "command": "claudeSessions.searchFor",
+          "when": "false"
         }
       ],
       "webview/context": [
@@ -278,6 +293,11 @@
           "command": "claudeSessions.openPr",
           "when": "webviewId == 'claudeSessions.list' && webviewSection == 'session' && sessionHasPr",
           "group": "1_main@7"
+        },
+        {
+          "command": "claudeSessions.rename",
+          "when": "webviewId == 'claudeSessions.list' && webviewSection == 'session' && sessionSource == 'claude'",
+          "group": "2_other@0"
         },
         {
           "command": "claudeSessions.openRawFile",

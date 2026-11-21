@@ -9,6 +9,7 @@ import {
   joinSearchText,
   oneLine,
   records,
+  shortArgs,
   toolHint,
   truncate,
 } from './sessionParser';
@@ -218,6 +219,7 @@ function toolPart(part: Record<string, any>): ToolUsePart {
     name: String(part.toolId ?? 'tool'),
     hint: message ? oneLine(plainMessage(message), 140) : toolHint(input),
     input: truncate(typeof input === 'string' ? input : JSON.stringify(input ?? {}, null, 2)),
+    args: shortArgs(input),
     result,
   };
 }

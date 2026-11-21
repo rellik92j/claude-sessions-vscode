@@ -9,15 +9,17 @@ import { buildHandoff, collectHandoffFacts, collectTranscriptFacts } from './han
 import { GroupBy, projectName, projectPath, SessionModel, workspaceFolderPaths } from './model';
 import { isEmptyQuery, parseQuery } from './query';
 import { SessionInfo, SessionSource } from './sessionParser';
-import { defaultCopilotDir, defaultProjectsDir, defaultVsCodeUserDirs, SessionStore, SourceRoots, sortTime } from './sessionStore';
+import { defaultCopilotDir, defaultProjectsDir, defaultVsCodeUserDirs, SessionStore, SourceRoots, sortTime, writeCustomTitle } from './sessionStore';
 import { isClaude, sessionKey, SOURCE_IDS, SOURCES, sourceOf, toSources } from './sources';
 import { parseTranscriptFor } from './transcripts';
 import { OverviewPanel } from './overviewPanel';
 import { SidebarView } from './sidebarView';
-import { TranscriptPanels } from './transcriptPanel';
+import { registerGitContentProvider, TranscriptPanels } from './transcriptPanel';
 
 const CONFIG = 'claudeSessions';
 const CLAUDE_CODE_EXTENSION = 'anthropic.claude-code';
+/** A session written to this recently counts as active (matches the sidebar's live dot). */
+const LIVE_MS = 3 * 60 * 1000;
 
 function config() {
   return vscode.workspace.getConfiguration(CONFIG);
@@ -442,6 +444,37 @@ export function activate(context: vscode.ExtensionContext): void {
     return true;
   };
 
+  /** Asks for a new name and writes it to the log. Resolves to true once renamed and the list reloaded. */
+  const rename = async (session: SessionInfo): Promise<boolean> => {
+    const name = await vscode.window.showInputBox({
+      title: 'Rename Session',
+      prompt: 'New name for this Claude Code session',
+      value: session.titleSource === 'custom' || session.titleSource === 'ai' ? session.title : '',
+      valueSelection: [0, session.title.length],
+      placeHolder: session.title,
+      validateInput: (v) => (v.trim() ? undefined : 'Enter a name'),
+    });
+    if (!name?.trim() || name.trim() === session.title) {
+      return false;
+    }
+    try {
+      await writeCustomTitle(session.filePath, session.id, name);
+    } catch (err) {
+      vscode.window.showErrorMessage(`Could not rename the session: ${(err as Error).message}`);
+      return false;
+    }
+    await model.reload();
+    // A running Claude Code keeps its own copy of the name and writes it back to the log now and then.
+    if (Date.now() - sortTime(session) < LIVE_MS) {
+      vscode.window.showWarningMessage(
+        'Renamed. This session looks active: if Claude Code still has it open, it may write its old name back. Use /rename inside that session to make it stick.',
+      );
+    } else {
+      vscode.window.setStatusBarMessage(`Renamed session to “${name.trim()}”`, 3000);
+    }
+    return true;
+  };
+
   const withSession = (fn: (s: SessionInfo) => unknown) => (arg: unknown) => {
     const s = toSession(arg);
     if (s) {
@@ -469,6 +502,11 @@ export function activate(context: vscode.ExtensionContext): void {
       return model.reload();
     }),
     vscode.commands.registerCommand('claudeSessions.focusSearch', () => sidebar.focusSearch()),
+    // Puts a query (such as skill:ship-change) in the sidebar's search box; used by the transcript's side panel.
+    vscode.commands.registerCommand('claudeSessions.searchFor', (query: unknown) =>
+      typeof query === 'string' ? sidebar.searchFor(query) : sidebar.focusSearch(),
+    ),
+    registerGitContentProvider(),
     vscode.commands.registerCommand('claudeSessions.searchForFile', (uri?: unknown) => {
       // From the Explorer or a tab's context menu the file comes as an argument; from the palette, the active editor.
       const target = isUri(uri) ? uri : vscode.window.activeTextEditor?.document.uri;
@@ -495,6 +533,7 @@ export function activate(context: vscode.ExtensionContext): void {
       }),
     ),
     vscode.commands.registerCommand('claudeSessions.openInClaudeCode', withClaudeSession('Open in Claude Code Chat', openInClaudeCode)),
+    vscode.commands.registerCommand('claudeSessions.rename', withClaudeSession('Rename', rename)),
     // Optional arguments: search words to highlight in the transcript, and true to open it in its own tab
     // rather than the shared preview tab.
     vscode.commands.registerCommand('claudeSessions.openTranscript', (arg: unknown, highlight?: unknown, keepOpen?: unknown) =>
@@ -694,7 +733,7 @@ async function searchSessions(model: SessionModel): Promise<void> {
     await model.reload();
   }
   const qp = vscode.window.createQuickPick<SessionPick>();
-  qp.placeholder = 'Search sessions and transcripts ("exact phrase", -exclude, a OR b, source:copilot) — Enter opens the transcript';
+  qp.placeholder = 'Search sessions and transcripts ("exact phrase", -exclude, a OR b, source:copilot, file:a.ts, skill:x, has:commits) — Enter opens the transcript';
   qp.matchOnDescription = true;
   qp.matchOnDetail = true;
   const basePicks = toPicks(model.visibleSessions()).map((p) => ({ ...p, buttons: [RESUME_BUTTON] }));

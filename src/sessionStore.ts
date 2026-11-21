@@ -284,6 +284,31 @@ export class SessionStore {
   }
 }
 
+/**
+ * Renames a Claude Code session the way its /rename does: by appending a custom-title record to the log. The last
+ * such record wins, so Claude Code, its VS Code extension and this sidebar all pick the new name up.
+ */
+export async function writeCustomTitle(filePath: string, sessionId: string, title: string): Promise<void> {
+  const name = title.replace(/\s+/g, ' ').trim();
+  if (!name) {
+    throw new Error('The name is empty.');
+  }
+  // Start on a fresh line if the log's last line was left without one.
+  let prefix = '';
+  const handle = await fs.open(filePath, 'r');
+  try {
+    const { size } = await handle.stat();
+    if (size > 0) {
+      const last = Buffer.alloc(1);
+      await handle.read(last, 0, 1, size - 1);
+      prefix = last[0] === 0x0a ? '' : '\n';
+    }
+  } finally {
+    await handle.close();
+  }
+  await fs.appendFile(filePath, `${prefix}${JSON.stringify({ type: 'custom-title', customTitle: name, sessionId })}\n`, 'utf8');
+}
+
 export function sortTime(s: SessionInfo): number {
   return s.lastTime ?? s.startTime ?? 0;
 }
