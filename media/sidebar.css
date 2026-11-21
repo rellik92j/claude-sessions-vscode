@@ -74,6 +74,35 @@ body.scrolled .toolbar {
 }
 .search input::placeholder { color: var(--vscode-input-placeholderForeground); }
 .search .clear[hidden] { display: none; }
+.search .icon-btn { width: 22px; height: 22px; color: var(--muted); }
+.search .icon-btn:hover, .search .icon-btn.active { color: var(--vscode-foreground); }
+.search .icon-btn.active { background: var(--vscode-toolbar-activeBackground, var(--subtle-2)); }
+
+/* Search filter help: the query syntax, each filter a button that adds it to the search. */
+.search-help {
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--hairline);
+  background: var(--vscode-editorWidget-background, var(--subtle));
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.search-help[hidden] { display: none; }
+.search-help p { margin: 0 0 6px; }
+.search-help p.note { margin: 6px 0 0; }
+.search-help ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 10px; align-items: baseline; }
+.search-help li { display: contents; }
+.search-help button {
+  justify-self: start;
+  padding: 1px 6px;
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  background: var(--vscode-textCodeBlock-background, var(--subtle-2));
+  cursor: pointer;
+}
+.search-help button:hover { border-color: var(--vscode-focusBorder); }
+.search-help code { font-family: var(--vscode-editor-font-family, monospace); font-size: 11.5px; color: var(--vscode-foreground); }
 
 .controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .spacer { flex: 1; }
@@ -247,27 +276,25 @@ body.vscode-light .avatar { color: hsl(var(--hue) 60% 35%); background: hsl(var(
   color: var(--vscode-badge-foreground);
 }
 
-.cards { display: flex; flex-direction: column; gap: 6px; padding: 2px 10px 6px 10px; }
+.cards { padding: 0 0 6px; }
 
 /* ---------- cards ---------- */
 
 .card {
   position: relative;
-  padding: 9px 11px 9px;
-  border-radius: var(--radius);
-  background: var(--subtle);
-  border: 1px solid var(--hairline);
+  padding: 8px 12px 8px 16px;
   cursor: pointer;
-  transition: background 0.12s, border-color 0.12s, transform 0.12s, box-shadow 0.12s;
 }
-.card:hover {
-  background: var(--vscode-list-hoverBackground, var(--subtle-2));
-  border-color: color-mix(in srgb, var(--vscode-focusBorder) 45%, transparent);
-  box-shadow: 0 2px 8px -4px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.35));
+/* Flat rows, like VS Code's own lists: a hairline between sessions, the theme's hover and focus colors. */
+.card + .card { border-top: 1px solid var(--hairline); }
+.card:hover { background: var(--vscode-list-hoverBackground, var(--subtle-2)); }
+.card:focus-visible { outline: 1px solid var(--vscode-list-focusOutline, var(--vscode-focusBorder)); outline-offset: -1px; }
+/* A live session is the one row that stands out: tinted, with a green edge. */
+.card.is-live {
+  background: color-mix(in srgb, var(--green) 7%, transparent);
+  box-shadow: inset 2px 0 0 var(--green);
 }
-.card:active { transform: scale(0.995); }
-.card:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 0; }
-.card.is-live { border-color: color-mix(in srgb, var(--green) 40%, transparent); }
+.card.is-live:hover { background: color-mix(in srgb, var(--green) 12%, transparent); }
 
 .card-head { display: flex; align-items: flex-start; gap: 7px; }
 .title {
@@ -413,7 +440,7 @@ mark {
 .empty h3 { margin: 0 0 4px; font-size: 13px; color: var(--vscode-foreground); }
 .empty p { margin: 0; font-size: 12px; line-height: 1.5; max-width: 240px; }
 
-.skeleton { margin: 6px 10px; cursor: default; pointer-events: none; }
+.skeleton { cursor: default; pointer-events: none; }
 .skeleton div {
   height: 10px;
   border-radius: 4px;
