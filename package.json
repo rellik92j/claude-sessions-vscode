@@ -149,6 +149,11 @@
         "icon": "$(search)"
       },
       {
+        "command": "claudeSessions.searchFor",
+        "title": "Search Sessions For…",
+        "category": "SessionsAI"
+      },
+      {
         "command": "claudeSessions.searchForFile",
         "title": "Search Sessions for This File",
         "category": "SessionsAI",
@@ -247,6 +252,10 @@
         {
           "command": "claudeSessions.searchForFile",
           "when": "resourceFilename"
+        },
+        {
+          "command": "claudeSessions.searchFor",
+          "when": "false"
         }
       ],
       "webview/context": [

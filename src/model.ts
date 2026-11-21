@@ -1,7 +1,7 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { DATE_BUCKETS, dateBucket, isInside, normalizePath } from './format';
-import { evaluate, Query, snippet, sourceAllowed } from './query';
+import { evaluate, fieldsMatch, Query, snippet, sourceAllowed } from './query';
 import { SessionInfo } from './sessionParser';
 import { SessionStore, sortTime } from './sessionStore';
 import { isClaude, NO_FOLDER, sessionFolder, sessionKey, SessionSource, SOURCE_IDS, sourceOf } from './sources';
@@ -140,7 +140,7 @@ export class SessionModel {
   search(q: Query, shownText: (s: SessionInfo) => string): SearchHit[] {
     const hits: SearchHit[] = [];
     for (const s of this.visibleSessions()) {
-      if (!sourceAllowed(q, sourceOf(s))) {
+      if (!sourceAllowed(q, sourceOf(s)) || !fieldsMatch(q, s)) {
         continue;
       }
       const shown = shownText(s);

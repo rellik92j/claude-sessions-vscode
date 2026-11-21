@@ -96,7 +96,7 @@
   // ---------- stats ----------
 
   // Widths are set here because the page's CSP doesn't allow inline style attributes.
-  document.querySelectorAll('.meter [data-fill]').forEach((el) => {
+  document.querySelectorAll('.meter [data-fill], .side-bar [data-fill]').forEach((el) => {
     el.style.width = `${Math.min(100, Number(el.dataset.fill) * 100)}%`;
   });
 

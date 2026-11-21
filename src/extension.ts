@@ -14,7 +14,7 @@ import { isClaude, sessionKey, SOURCE_IDS, SOURCES, sourceOf, toSources } from '
 import { parseTranscriptFor } from './transcripts';
 import { OverviewPanel } from './overviewPanel';
 import { SidebarView } from './sidebarView';
-import { TranscriptPanels } from './transcriptPanel';
+import { registerGitContentProvider, TranscriptPanels } from './transcriptPanel';
 
 const CONFIG = 'claudeSessions';
 const CLAUDE_CODE_EXTENSION = 'anthropic.claude-code';
@@ -502,6 +502,11 @@ export function activate(context: vscode.ExtensionContext): void {
       return model.reload();
     }),
     vscode.commands.registerCommand('claudeSessions.focusSearch', () => sidebar.focusSearch()),
+    // Puts a query (such as skill:ship-change) in the sidebar's search box; used by the transcript's side panel.
+    vscode.commands.registerCommand('claudeSessions.searchFor', (query: unknown) =>
+      typeof query === 'string' ? sidebar.searchFor(query) : sidebar.focusSearch(),
+    ),
+    registerGitContentProvider(),
     vscode.commands.registerCommand('claudeSessions.searchForFile', (uri?: unknown) => {
       // From the Explorer or a tab's context menu the file comes as an argument; from the palette, the active editor.
       const target = isUri(uri) ? uri : vscode.window.activeTextEditor?.document.uri;
@@ -728,7 +733,7 @@ async function searchSessions(model: SessionModel): Promise<void> {
     await model.reload();
   }
   const qp = vscode.window.createQuickPick<SessionPick>();
-  qp.placeholder = 'Search sessions and transcripts ("exact phrase", -exclude, a OR b, source:copilot) — Enter opens the transcript';
+  qp.placeholder = 'Search sessions and transcripts ("exact phrase", -exclude, a OR b, source:copilot, file:a.ts, skill:x, has:commits) — Enter opens the transcript';
   qp.matchOnDescription = true;
   qp.matchOnDetail = true;
   const basePicks = toPicks(model.visibleSessions()).map((p) => ({ ...p, buttons: [RESUME_BUTTON] }));

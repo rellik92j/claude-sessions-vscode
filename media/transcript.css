@@ -583,6 +583,7 @@ mark.hit.current {
   z-index: 30;
   width: var(--side);
   max-width: 100vw;
+  overflow-x: hidden;
   overflow-y: auto;
   padding: 0 0 24px;
   border-left: 1px solid var(--hairline);
@@ -689,7 +690,7 @@ button.side-row:hover, a.side-row:hover { background: var(--vscode-list-hoverBac
 }
 .side-failed { flex: none; color: var(--red); font-size: 11px; font-weight: 500; }
 .side-num { flex: none; min-width: 16px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-.side-section[data-section='prompts'] .side-row { padding-left: 14px; flex-wrap: nowrap; align-items: flex-start; }
+.side-section[data-section='prompts'] .side-row { padding-left: 14px; flex-wrap: wrap; align-items: flex-start; }
 .side-section[data-section='prompts'] .side-main { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .side-more {
   margin: -2px 0 8px 33px;
@@ -706,3 +707,51 @@ button.side-row:hover, a.side-row:hover { background: var(--vscode-list-hoverBac
 .msg.user.flash .bubble { animation: flash 1.2s ease-out; }
 @keyframes flash { 0%, 30% { box-shadow: 0 0 0 2px var(--vscode-focusBorder); } 100% { box-shadow: 0 0 0 2px transparent; } }
 .msg.user { scroll-margin-top: 90px; }
+
+/* Row actions (compare, edits, find sessions) appear over the end of a file row on hover or focus. */
+.side-list li.has-actions { position: relative; }
+.side-actions {
+  position: absolute;
+  top: 2px;
+  right: 8px;
+  display: none;
+  gap: 1px;
+  padding-left: 12px;
+  background: linear-gradient(to right, transparent, var(--vscode-list-hoverBackground, var(--subtle)) 12px);
+}
+.side-actions .icon-btn { width: 22px; height: 22px; }
+.side-actions .icon-btn .codicon { font-size: 13px; }
+.side-list li.has-actions:hover .side-actions,
+.side-list li.has-actions:focus-within .side-actions { display: flex; }
+.side-list li.has-actions:hover .side-row { background: var(--vscode-list-hoverBackground, var(--subtle)); }
+
+.side-progress { margin-left: 4px; color: var(--muted); font-weight: 400; font-size: 11.5px; }
+.side-row.todo { align-items: flex-start; flex-wrap: nowrap; padding-left: 14px; }
+.side-row.todo .codicon { flex: none; margin-top: 3px; font-size: 13px; }
+.side-row.todo .side-main { white-space: normal; }
+.side-row.todo.done .codicon { color: var(--green); }
+.side-row.todo.done .side-main { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--hairline); }
+.side-row.todo.active .codicon { color: var(--vscode-charts-blue, #3794ff); }
+.side-row.todo.active .side-main { font-weight: 600; }
+.side-row.todo.pending .codicon { color: var(--muted); }
+
+/* Prompts: cost and time of each reply, with a bar scaled to the costliest prompt. */
+.side-row.prompt { flex-wrap: wrap; }
+.side-row.prompt .side-main { flex: 1 1 0; }
+.side-cost { flex: none; margin-left: auto; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.side-cost span { opacity: 0.8; }
+.side-bar { flex: 1 0 calc(100% - 22px); height: 2px; margin: 3px 0 1px 22px; border-radius: 999px; background: var(--subtle-2); overflow: hidden; }
+.side-bar span { display: block; height: 100%; width: 0; background: var(--claude); opacity: 0.75; }
+
+.turn-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 2px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--subtle);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.turn-chip .codicon { font-size: 12px; }

@@ -1,8 +1,11 @@
 // What a session did, gathered from its transcript for the transcript's side panel: files changed and read, commits,
-// pull requests, skills and slash commands, subagents, web lookups and tool use.
+// pull requests, the todo list, skills and slash commands, subagents, web lookups, tool use and each prompt's cost.
 // No VS Code imports here so it can be unit-tested with plain Node.
 
-import { TranscriptEntry, TranscriptPart } from './sessionParser';
+import { TranscriptEntry, TranscriptPart, TurnStats } from './sessionParser';
+import { COMMIT_LINE, commitSubject, fileAccess, filePathOf, isCommitCommand, isShellTool } from './tools';
+
+export { commitSubject } from './tools';
 
 type ToolPart = Extract<TranscriptPart, { kind: 'tool_use' }>;
 
@@ -12,12 +15,21 @@ export interface FileTouch {
   count: number;
   /** A tool created or overwrote it whole, rather than editing part of it. */
   written?: boolean;
+  /** The replaced and replacement text of each edit, in order (truncated like the transcript's diffs). */
+  edits?: { before: string; after: string }[];
 }
 
 export interface Commit {
   hash: string;
   branch: string;
   subject: string;
+}
+
+export type TodoStatus = 'pending' | 'active' | 'done';
+
+export interface Todo {
+  text: string;
+  status: TodoStatus;
 }
 
 export interface SessionInsights {
@@ -28,6 +40,8 @@ export interface SessionInsights {
   unresolvedCommits: string[];
   /** Pull request URLs that `gh pr create` printed. */
   pullRequests: string[];
+  /** The todo list as the session last left it. */
+  todos: Todo[];
   /** Skills Claude loaded with the Skill tool, with how often. */
   skills: { name: string; count: number }[];
   /** Slash commands typed as prompts ("/model", "/start-change …"), by name. */
@@ -38,60 +52,11 @@ export interface SessionInsights {
   mcpServers: { name: string; count: number }[];
   tools: { name: string; count: number; failed: number }[];
   /** The user's prompts in order, for jumping around the transcript; `index` is the entry's position. */
-  prompts: { index: number; text: string }[];
+  prompts: { index: number; text: string; turn?: TurnStats }[];
   failedTools: number;
 }
 
-const WRITE_TOOLS = new Set(['write', 'create', 'create_file', 'copilot_createfile']);
-const EDIT_TOOLS = new Set(['edit', 'multiedit', 'notebookedit', 'str_replace', 'apply_patch', 'insert', 'copilot_editfile', 'copilot_replacestring', 'copilot_insertedit', 'copilot_applypatch']);
-const READ_TOOLS = new Set(['read', 'view', 'read_file', 'copilot_readfile']);
-const SHELL_TOOLS = new Set(['bash', 'powershell', 'shell', 'run_in_terminal', 'copilot_runinterminal']);
-
-/** `[main 1a2b3c4] Subject` and `[main (root-commit) 1a2b3c4] Subject`, as git commit prints them. */
-const COMMIT_LINE = /^\[([^\s\]]+)(?: \([^)]*\))? ([0-9a-f]{7,40})\] (.+)$/gm;
 const PR_URL = /https:\/\/github\.com\/[^\s/]+\/[^\s/]+\/pull\/\d+/g;
-
-/**
- * The subject of the message a `git commit` command passes inline: `-m "…"` or a heredoc (`-F - <<'EOF'`).
- * Undefined when the message comes from elsewhere (an editor, a file).
- */
-export function commitSubject(command: string): string | undefined {
-  const m = /\bcommit\b[^\n]*?(?:-m|--message)[ =](?:"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+))/.exec(command);
-  if (m) {
-    const msg = (m[1] ?? m[2] ?? m[3] ?? '').replace(/\\(.)/g, '$1');
-    return msg.split('\n')[0].trim() || undefined;
-  }
-  const h = /\bcommit\b[^\n]*<<-?\s*['"]?(\w+)['"]?[^\n]*\n([\s\S]*)/.exec(command);
-  if (h) {
-    const first = h[2].split('\n').find((l) => l.trim());
-    return first && first.trim() !== h[1] ? first.trim() : undefined;
-  }
-  return undefined;
-}
-
-function filePath(args: Record<string, string> | undefined): string | undefined {
-  const p = args?.file_path ?? args?.notebook_path ?? args?.filePath ?? args?.path;
-  return p?.trim() || undefined;
-}
-
-/** Kind of file access a tool call is, or undefined when it isn't one. */
-function fileAccess(t: ToolPart): 'write' | 'edit' | 'read' | undefined {
-  const name = t.name.toLowerCase();
-  if (name === 'str_replace_editor') {
-    const cmd = t.args?.command;
-    return cmd === 'view' ? 'read' : cmd === 'create' ? 'write' : 'edit';
-  }
-  if (WRITE_TOOLS.has(name)) {
-    return 'write';
-  }
-  if (EDIT_TOOLS.has(name)) {
-    return 'edit';
-  }
-  if (READ_TOOLS.has(name)) {
-    return 'read';
-  }
-  return undefined;
-}
 
 function bump<T extends { count: number }>(map: Map<string, T>, key: string, make: () => T): T {
   let v = map.get(key);
@@ -105,6 +70,77 @@ function bump<T extends { count: number }>(map: Map<string, T>, key: string, mak
 
 const byCount = <T extends { count: number }>(a: T, b: T) => b.count - a.count;
 
+function todoStatus(value: unknown): TodoStatus {
+  const s = String(value ?? '').toLowerCase().replace(/[\s_-]/g, '');
+  return s === 'completed' || s === 'done' || s === 'x' ? 'done' : s === 'inprogress' || s === 'active' ? 'active' : 'pending';
+}
+
+function parseJsonArray(text: string | undefined): any[] | undefined {
+  if (!text) {
+    return undefined;
+  }
+  try {
+    const v = JSON.parse(text);
+    return Array.isArray(v) ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Keeps the todo list current through the tools that write one: Claude Code's TodoWrite (the whole list each time) and
+ * TaskCreate/TaskUpdate (one task at a time), Copilot CLI's update_todo (a markdown checklist) and VS Code Chat's
+ * todo list tool.
+ */
+class TodoTracker {
+  private list: Todo[] = [];
+  private readonly tasks = new Map<string, Todo>();
+  private nextTask = 1;
+
+  add(t: ToolPart): void {
+    const name = t.name.toLowerCase();
+    const args = t.args ?? {};
+    if (name === 'todowrite') {
+      const todos = parseJsonArray(args.todos);
+      if (todos) {
+        this.tasks.clear();
+        this.list = todos.filter((x) => x && typeof x.content === 'string').map((x) => ({ text: x.content, status: todoStatus(x.status) }));
+      }
+    } else if (name === 'taskcreate' && args.subject) {
+      const id = /#(\d+)/.exec(t.result?.text ?? '')?.[1] ?? String(this.nextTask);
+      this.nextTask = Math.max(this.nextTask, Number(id) + 1);
+      const todo: Todo = { text: args.subject, status: 'pending' };
+      this.tasks.set(id, todo);
+      this.list.push(todo);
+    } else if (name === 'taskupdate' && args.taskId) {
+      const todo = this.tasks.get(args.taskId);
+      if (todo) {
+        if (args.status === 'deleted') {
+          this.list = this.list.filter((x) => x !== todo);
+          this.tasks.delete(args.taskId);
+        } else {
+          todo.status = args.status ? todoStatus(args.status) : todo.status;
+          todo.text = args.subject || todo.text;
+        }
+      }
+    } else if (name === 'update_todo' && args.todos) {
+      const items = [...args.todos.matchAll(/^\s*[-*]\s*\[([ xX~-])\]\s*(.+)$/gm)];
+      if (items.length) {
+        this.list = items.map((m) => ({ text: m[2].trim(), status: m[1].toLowerCase() === 'x' ? 'done' : m[1] === ' ' ? 'pending' : 'active' }));
+      }
+    } else if (/todo/.test(name)) {
+      const todos = parseJsonArray(args.todoList);
+      if (todos) {
+        this.list = todos.filter((x) => x && typeof x.title === 'string').map((x) => ({ text: x.title, status: todoStatus(x.status) }));
+      }
+    }
+  }
+
+  get todos(): Todo[] {
+    return this.list.map((t) => ({ ...t }));
+  }
+}
+
 export function collectInsights(entries: TranscriptEntry[]): SessionInsights {
   const changed = new Map<string, FileTouch>();
   const read = new Map<string, FileTouch>();
@@ -115,6 +151,7 @@ export function collectInsights(entries: TranscriptEntry[]): SessionInsights {
   const commands = new Map<string, { name: string; count: number }>();
   const mcp = new Map<string, { name: string; count: number }>();
   const tools = new Map<string, { name: string; count: number; failed: number }>();
+  const todos = new TodoTracker();
   const subagents: SessionInsights['subagents'] = [];
   const web: SessionInsights['web'] = [];
   const prompts: SessionInsights['prompts'] = [];
@@ -128,7 +165,7 @@ export function collectInsights(entries: TranscriptEntry[]): SessionInsights {
         bump(commands, cmd[1], () => ({ name: `/${cmd[1]}`, count: 0 }));
       }
       if (text) {
-        prompts.push({ index, text });
+        prompts.push({ index, text, turn: e.turn });
       }
       return;
     }
@@ -148,14 +185,20 @@ export function collectInsights(entries: TranscriptEntry[]): SessionInsights {
         const label = mcpServer.replace(/^claude_ai_|^plugin_/, '').replace(/_/g, ' ');
         bump(mcp, label, () => ({ name: label, count: 0 }));
       }
+      if (!failed) {
+        todos.add(p);
+      }
 
-      const access = fileAccess(p);
-      const file = access && !failed ? filePath(p.args) : undefined;
+      const access = fileAccess(p.name, p.args);
+      const file = access && !failed ? filePathOf(p.args) : undefined;
       if (file && access) {
         const target = access === 'read' ? read : changed;
         const touch = bump<FileTouch>(target, file, () => ({ path: file, count: 0 }));
         if (access === 'write') {
           touch.written = true;
+        }
+        if (p.diff) {
+          (touch.edits ??= []).push(p.diff);
         }
       }
 
@@ -168,9 +211,9 @@ export function collectInsights(entries: TranscriptEntry[]): SessionInsights {
         web.push({ kind: 'fetch', text: p.args.url });
       } else if (name === 'websearch' && p.args?.query) {
         web.push({ kind: 'search', text: p.args.query });
-      } else if (SHELL_TOOLS.has(name) && p.result && !failed) {
+      } else if (isShellTool(name) && p.result && !failed) {
         const command = p.args?.command ?? '';
-        if (/\bgit\b[^|;&\n]*\bcommit\b/.test(command)) {
+        if (isCommitCommand(command)) {
           let found = false;
           for (const m of p.result.text.matchAll(COMMIT_LINE)) {
             commits.set(m[2], { branch: m[1], hash: m[2], subject: m[3].trim() });
@@ -201,6 +244,7 @@ export function collectInsights(entries: TranscriptEntry[]): SessionInsights {
     commits: [...commits.values()],
     unresolvedCommits: [...unresolved].filter((subj) => ![...commits.values()].some((c) => c.subject === subj)),
     pullRequests: [...pullRequests],
+    todos: todos.todos,
     skills: [...skills.values()].sort(byCount),
     commands: [...commands.values()].sort(byCount),
     subagents,
@@ -210,4 +254,25 @@ export function collectInsights(entries: TranscriptEntry[]): SessionInsights {
     prompts,
     failedTools,
   };
+}
+
+/**
+ * The session's edits of one file as a unified-diff-style document, for when there is no repository to compare
+ * against. Each edit is a hunk of the replaced and replacement text; whole-file writes are noted, not shown.
+ */
+export function editsAsDiff(file: FileTouch): string {
+  const lines = [`--- ${file.path} (before the session's edits)`, `+++ ${file.path} (after)`];
+  if (file.written) {
+    lines.push('', '# The session wrote this file whole; its full content is not kept in the log.');
+  }
+  (file.edits ?? []).forEach((edit, i) => {
+    lines.push(`@@ edit ${i + 1} of ${file.edits!.length} @@`);
+    for (const l of edit.before.split('\n')) {
+      lines.push(`-${l}`);
+    }
+    for (const l of edit.after.split('\n')) {
+      lines.push(`+${l}`);
+    }
+  });
+  return lines.join('\n') + '\n';
 }

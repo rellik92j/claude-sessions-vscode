@@ -37,6 +37,9 @@ To find the sessions that worked on a file, right-click it in the Explorer or ri
 | `-flaky` or `-"some phrase"` | sessions that *don't* contain it |
 | `redis OR postgres` | sessions containing either word |
 | `source:copilot` or `-source:chat` | sessions from one tool, or all but one (`claude`, `copilot`, `chat`) |
+| `file:auth.ts` | Claude Code sessions that changed a file whose path contains `auth.ts` (`file:src/auth` works too) |
+| `skill:ship` | Claude Code sessions that loaded a skill whose name contains `ship` |
+| `has:commits`, `has:pr`, `has:edits` | Claude Code sessions that made a commit, opened a pull request or changed files; `-has:…` for the opposite |
 
 ### Read a session as a chat
 
@@ -47,7 +50,9 @@ Click a session to open its transcript. Your prompts are on the right and Claude
 - Each tool call is a compact row with a ✓ or ✗. Click it to see the input and output. File edits show as a red/green diff.
 - Hide tool calls to read just the conversation, or jump straight to the latest message.
 - If you opened the transcript from a search, your search words are highlighted and it starts at the first match. Step through matches with F3 / Shift+F3.
-- The **Session details** panel (the sidebar button at the top right) lists what the session did: files changed (click to open), commits (click for the diff), pull requests, skills and slash commands, subagents, MCP servers, web lookups, files read, tool calls with failures, and every prompt so you can jump between them.
+- The **Session details** panel (the sidebar button at the top right) lists what the session did: files changed, commits (click for the diff), pull requests, its to-do list as it left it, skills and slash commands, subagents, MCP servers, web lookups, files read, tool calls with failures, and every prompt so you can jump between them.
+- Hover a changed file to compare it with how it was before the session (the last commit before the session started, against the file now), see only the session's own edits, or find the other sessions that changed it. Click a skill to find the other sessions that used it.
+- Each prompt shows what Claude's reply to it cost at API prices and how long it took, beside the prompt and in the panel's prompt list, with a bar against the costliest one.
 - Transcripts open in a single preview tab that the next one replaces, so tabs don't pile up. Double-click a session, or click **Keep open**, to give it a tab of its own.
 
 ### See what a session used and cost

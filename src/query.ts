@@ -4,6 +4,8 @@
 //   -word -"a b"  sessions NOT containing it
 //   a OR b        either one
 //   source:copilot  only sessions from that tool (claude, copilot, chat); -source:chat leaves it out
+//   file:auth.ts  sessions that changed a file whose path contains it; skill:ship  that loaded a matching skill
+//   has:commits has:pr has:edits  sessions that committed, opened a pull request or changed files; -has:… the opposite
 // Terms separated by spaces must all match. No VS Code imports, so it can be unit-tested with plain Node.
 
 import { SessionSource, sourceAlias } from './sources';
@@ -21,7 +23,39 @@ export interface Query {
   highlight: string[];
   /** From `source:` terms: sessions must come from one of `include` (when any) and from none of `exclude`. */
   sources: { include: SessionSource[]; exclude: SessionSource[] };
+  /** From `file:`, `skill:` and `has:` terms; all must hold. */
+  fields: FieldFilter[];
 }
+
+export type HasWhat = 'commits' | 'pr' | 'edits';
+
+export type FieldFilter =
+  | { kind: 'file' | 'skill'; value: string; negate: boolean }
+  | { kind: 'has'; value: HasWhat; negate: boolean };
+
+/** What a session did, as the field filters see it (Claude Code sessions record these). */
+export interface SessionFacts {
+  changedFiles?: string[];
+  skills?: string[];
+  commitCount?: number;
+  prUrl?: string;
+}
+
+const HAS_ALIASES: Record<string, HasWhat> = {
+  commit: 'commits',
+  commits: 'commits',
+  pr: 'pr',
+  prs: 'pr',
+  pull: 'pr',
+  edit: 'edits',
+  edits: 'edits',
+  changes: 'edits',
+};
+
+/** Backslashes as forward slashes, so `file:src/a.ts` matches Windows paths. */
+const slashes = (p: string) => p.split('\\').join('/');
+
+const FIELD_TERM =/^(-?)(file|skill|has):(.+)$/i;
 
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -38,6 +72,7 @@ const SOURCE_TERM = /^(-?)source:(.+)$/i;
 export function parseQuery(input: string): Query {
   const clauses: Term[][] = [];
   const sources: Query['sources'] = { include: [], exclude: [] };
+  const fields: FieldFilter[] = [];
   let orPending = false;
   for (const m of input.matchAll(TOKEN)) {
     let text: string;
@@ -53,6 +88,21 @@ export function parseQuery(input: string): Query {
       if (sm && source) {
         (sm[1] ? sources.exclude : sources.include).push(source);
         continue;
+      }
+      // Likewise a known has: value; file: and skill: take any value.
+      const fm = FIELD_TERM.exec(text);
+      if (fm) {
+        const kind = fm[2].toLowerCase() as 'file' | 'skill' | 'has';
+        const negate = fm[1] === '-';
+        if (kind !== 'has') {
+          fields.push({ kind, value: slashes(fm[3].toLowerCase()), negate });
+          continue;
+        }
+        const what = HAS_ALIASES[fm[3].toLowerCase()];
+        if (what) {
+          fields.push({ kind, value: what, negate });
+          continue;
+        }
       }
       const prev = clauses[clauses.length - 1];
       if (text === 'OR' && prev && !prev[0].negate && !orPending) {
@@ -77,11 +127,30 @@ export function parseQuery(input: string): Query {
     orPending = false;
   }
   const highlight = [...new Set(clauses.flat().filter((t) => !t.negate).map((t) => t.text.toLowerCase()))];
-  return { clauses, highlight, sources };
+  return { clauses, highlight, sources, fields };
 }
 
 export const isEmptyQuery = (q: Query) =>
-  q.clauses.length === 0 && q.sources.include.length === 0 && q.sources.exclude.length === 0;
+  q.clauses.length === 0 && q.sources.include.length === 0 && q.sources.exclude.length === 0 && q.fields.length === 0;
+
+/** True when the session's facts satisfy every `file:`, `skill:` and `has:` term. */
+export function fieldsMatch(q: Query, s: SessionFacts): boolean {
+  return q.fields.every((f) => {
+    let hit: boolean;
+    if (f.kind === 'file') {
+      hit = !!s.changedFiles?.some((p) => slashes(p.toLowerCase()).includes(f.value));
+    } else if (f.kind === 'skill') {
+      hit = !!s.skills?.some((k) => k.toLowerCase().includes(f.value));
+    } else if (f.value === 'commits') {
+      hit = (s.commitCount ?? 0) > 0;
+    } else if (f.value === 'pr') {
+      hit = !!s.prUrl;
+    } else {
+      hit = !!s.changedFiles?.length;
+    }
+    return f.negate ? !hit : hit;
+  });
+}
 
 /** True when the query's `source:` terms allow this source. */
 export function sourceAllowed(q: Query, source: SessionSource): boolean {
