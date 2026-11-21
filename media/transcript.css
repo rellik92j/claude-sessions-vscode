@@ -767,3 +767,99 @@ button.side-row:hover, a.side-row:hover { background: var(--vscode-list-hoverBac
   font-variant-numeric: tabular-nums;
 }
 .turn-chip .codicon { font-size: 12px; }
+
+/* ---------- message box ---------- */
+
+/* Pinned to the bottom of the tab, in the conversation's column; the page ends at the box rather than below it. */
+body.has-composer { padding-bottom: 0; }
+body.has-composer .fab { bottom: calc(var(--composer-h, 110px) + 12px); }
+.composer {
+  position: sticky;
+  bottom: 0;
+  z-index: 15;
+  max-width: var(--content);
+  margin: 28px auto 0;
+  padding: 14px 0 14px;
+  /* Fades the conversation out above the box instead of a hard edge. */
+  background: linear-gradient(to bottom, transparent, var(--vscode-editor-background) 14px);
+}
+.composer-box {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 6px 6px 6px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--vscode-input-border, var(--hairline));
+  background: var(--vscode-input-background, var(--subtle));
+}
+.composer-box:focus-within { border-color: var(--vscode-focusBorder); }
+.composer-box textarea {
+  flex: 1;
+  min-width: 0;
+  max-height: 12em;
+  padding: 4px 0;
+  border: none;
+  outline: none;
+  resize: none;
+  overflow-y: auto;
+  background: transparent;
+  color: var(--vscode-input-foreground, var(--vscode-foreground));
+  font: inherit;
+  line-height: 1.5;
+}
+.composer-box textarea::placeholder { color: var(--vscode-input-placeholderForeground, var(--muted)); }
+.composer-actions { display: flex; align-items: center; gap: 2px; flex: none; }
+.composer-actions .btn:disabled { opacity: 0.5; cursor: default; }
+.composer-actions .icon-btn[aria-expanded='true'] { background: var(--vscode-toolbar-activeBackground, var(--subtle-2)); }
+
+.composer-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 6px;
+  margin: 6px 4px 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.composer-status .codicon { font-size: 12px; align-self: center; }
+.composer-status .why { color: var(--vscode-charts-yellow, #cca700); }
+
+.composer-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 20;
+  min-width: 260px;
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border, var(--hairline)));
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)));
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
+  box-shadow: 0 4px 16px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.35));
+  font-size: 12.5px;
+}
+.composer-menu[hidden] { display: none; }
+.composer-menu .menu-label { padding: 6px 8px 2px; font-size: 11.5px; color: var(--muted); }
+.composer-menu .menu-sep { height: 1px; margin: 4px 0; background: var(--hairline); }
+.composer-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.composer-menu button:hover:not([disabled]), .composer-menu button:focus-visible {
+  background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground, var(--subtle-2)));
+  color: var(--vscode-menu-selectionForeground, inherit);
+  outline: none;
+}
+.composer-menu button[disabled] { opacity: 0.5; cursor: default; }
+.composer-menu button .codicon { width: 14px; }
+.composer-menu button[aria-checked='true'] .codicon-check { color: var(--vscode-focusBorder); }

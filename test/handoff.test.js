@@ -295,3 +295,16 @@ test('handoff notes: Copilot CLI and VS Code Chat transcripts', () => {
   const f = collectTranscriptFacts(entries, 'C:\\repo');
   assert.deepEqual(f.handoffNotes, [path.join('C:\\repo', 'docs', 'handoff.md'), path.join(os.homedir(), 'Desktop', 'handoff.md')]);
 });
+
+test('buildHandoff with a request from the message box ends with it instead of waiting', () => {
+  const f = { lastPrompt: 'Do it', lastReply: 'Done', modified: [], read: [], todos: [] };
+  const text = buildHandoff(session, f, 'C:\repo', undefined, 'claude', '  Now add tests\nfor the login form  ');
+  assert.match(text, /Carry on with my next request:\n\nNow add tests\nfor the login form$/);
+  assert.doesNotMatch(text, /wait for my instruction/);
+  assert.match(buildHandoff(session, f, 'C:\repo', undefined, 'claude', '   '), /wait for my instruction\.$/, 'a blank request is no request');
+  const notes = buildHandoff(session, { ...f, handoffNotes: ['C:\notes\handoff.md'] }, 'C:\repo', undefined, 'claude', 'Go');
+  assert.match(notes, /First read the handoff notes named at the top\. Then carry on with my next request:\n\nGo$/);
+  // Too big to fit: the summary shrinks, the request is never clipped.
+  const big = 'x'.repeat(MAX_HANDOFF);
+  assert.ok(buildHandoff(session, f, 'C:\repo', undefined, 'claude', big).endsWith(big));
+});

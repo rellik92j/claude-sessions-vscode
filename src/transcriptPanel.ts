@@ -9,7 +9,7 @@ import { renderMarkdown } from './markdown';
 import { projectName, projectPath, SessionModel } from './model';
 import { SessionInfo, TranscriptEntry, TranscriptPart, TurnStats } from './sessionParser';
 import { parseTranscriptFor } from './transcripts';
-import { isClaude, NO_FOLDER, sessionKey, SourceInfo, SOURCES, sourceOf } from './sources';
+import { canResumeIn, ContinueTarget, isClaude, NO_FOLDER, sessionKey, SessionSource, SourceInfo, SOURCES, sourceOf } from './sources';
 import { UsageSummary } from './usage';
 
 type ToolPart = Extract<TranscriptPart, { kind: 'tool_use' }>;
@@ -39,6 +39,8 @@ export class TranscriptPanels {
     private readonly extensionUri: vscode.Uri,
     private readonly hasClaudeCode: () => boolean,
     private readonly model: SessionModel,
+    /** The tool last chosen in a message box for this kind of session, if any. */
+    private readonly composerTarget: (source: SessionSource) => ContinueTarget | undefined = () => undefined,
   ) {}
 
   /**
@@ -107,6 +109,23 @@ export class TranscriptPanels {
           const opened = await vscode.commands.executeCommand<boolean>(`claudeSessions.${msg.command}`, tab.session);
           if (opened === true && vscode.workspace.getConfiguration('claudeSessions').get<boolean>('closeTranscriptOnResume', true)) {
             panel.dispose();
+          }
+          break;
+        }
+        case 'send': {
+          // The message box: the extension routes it, and this tab closes once it has gone, like Resume.
+          const sent = await vscode.commands.executeCommand<boolean>(
+            'claudeSessions.sendMessage',
+            tab.session,
+            msg.text,
+            msg.target,
+            msg.mode,
+            msg.pickModel === true,
+          );
+          if (sent === true && vscode.workspace.getConfiguration('claudeSessions').get<boolean>('closeTranscriptOnResume', true)) {
+            panel.dispose();
+          } else {
+            panel.webview.postMessage({ type: sent === true ? 'sent' : 'sendFailed' });
           }
           break;
         }
@@ -215,6 +234,7 @@ export class TranscriptPanels {
     webview.html = buildHtml(session, entries, {
       showThinking,
       lineWidth: lineWidthSetting(),
+      composerTarget: this.composerTarget(sourceOf(session)),
       highlight: tab.highlight,
       preview: tab.preview,
       insights,
@@ -374,6 +394,8 @@ interface HtmlOptions {
   showThinking: boolean;
   /** How wide prose gets; full when omitted. */
   lineWidth?: LineWidth;
+  /** The tool last chosen in a message box for this kind of session; the session's own tool when omitted. */
+  composerTarget?: ContinueTarget;
   /** What the session did, for the side panel; collected from `entries` when omitted. */
   insights?: SessionInsights;
   /** Search words for transcript.js to mark. */
@@ -606,6 +628,52 @@ function renderEntry(e: TranscriptEntry, showThinking: boolean, source: SourceIn
 }
 
 const CONTEXT_WARN = 0.8;
+
+/** Display names for where the message box can send. */
+function targetInfo(target: ContinueTarget, hasClaudeCode: boolean): { label: string; icon: string } {
+  if (target === 'claude-chat') {
+    return { label: 'Claude Code chat', icon: 'comment-discussion' };
+  }
+  const s = SOURCES[target];
+  return { label: target === 'claude' && hasClaudeCode ? 'Claude Code CLI' : s.label, icon: target === 'claude' ? 'terminal' : s.icon };
+}
+
+/**
+ * The message box at the bottom of the page: type the next message and it goes to this session, or to a new one with
+ * a handoff. What transcript.js needs to pick and describe the route goes in as JSON; the extension does the sending.
+ */
+function renderComposer(session: SessionInfo, o: HtmlOptions): string {
+  const own = sourceOf(session);
+  const all: ContinueTarget[] = ['claude', 'claude-chat', 'copilot-cli', 'vscode-chat'];
+  const targets = [own, ...all.filter((t) => t !== own)].filter((t) => t !== 'claude-chat' || o.hasClaudeCode);
+  const fill = session.usage?.context ? session.usage.context.tokens / session.usage.context.limit : 0;
+  const data = {
+    target: o.composerTarget && targets.includes(o.composerTarget) ? o.composerTarget : own,
+    targets: targets.map((id) => ({
+      id,
+      ...targetInfo(id, o.hasClaudeCode),
+      same: canResumeIn(own, id),
+      cli: id !== 'claude-chat' && id !== 'vscode-chat',
+    })),
+    context: fill >= CONTEXT_WARN ? Math.round(fill * 100) : 0,
+    // When the prompt cache lapses (ms since epoch); 0 when unknown, as for sources without usage.
+    cacheExpires: session.usage?.cache ? session.usage.cache.lastRequest + session.usage.cache.ttlMs : 0,
+    // Tokens in the context at the last request: re-caching a small conversation costs little, so only a large one
+    // with an expired cache defaults to a handoff.
+    contextTokens: session.usage?.context?.tokens ?? 0,
+  };
+  return `<footer class="composer" id="composer" data-composer="${escapeHtml(JSON.stringify(data))}">
+  <div class="composer-box">
+    <textarea id="composer-input" rows="1" placeholder="Message to continue this session" aria-label="Message to continue this session" aria-describedby="composer-status"></textarea>
+    <div class="composer-actions">
+      <button class="btn primary" id="composer-send" title="Send (Enter). Shift+Enter adds a line."><i class="codicon codicon-send"></i><span>Send</span></button>
+      <button class="icon-btn" id="composer-more" title="Where to send" aria-haspopup="menu" aria-expanded="false" aria-controls="composer-menu"><i class="codicon codicon-chevron-up"></i></button>
+    </div>
+    <div class="composer-menu" id="composer-menu" role="menu" hidden></div>
+  </div>
+  <div class="composer-status" id="composer-status" aria-live="polite"></div>
+</footer>`;
+}
 
 /** Context, prompt cache, cost and token tiles, with the cost broken down by token type underneath. */
 function renderStats(u: UsageSummary): string {
@@ -960,6 +1028,7 @@ export function buildHtml(session: SessionInfo, entries: TranscriptEntry[], o: H
 <main class="conversation">
 ${conversation || '<div class="empty"><i class="codicon codicon-comment-discussion"></i><p>This session has no messages yet.</p></div>'}
 </main>
+${renderComposer(session, o)}
 ${renderSide(o.insights ?? collectInsights(entries), proj)}
 <button class="fab" id="jump" title="Jump to latest"><i class="codicon codicon-arrow-down"></i></button>
 <script nonce="${nonce}" src="${o.js}"></script>

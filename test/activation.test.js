@@ -128,7 +128,9 @@ test('bundled extension activates, fills the sidebar, and renders a transcript',
   try {
     delete require.cache[bundle];
     const ext = require(bundle);
-    ext.activate({ subscriptions: [], extensionUri: vscode.Uri.file(extDir) });
+    // globalState: a plain object, so the test can see what is remembered.
+    const globalState = { get: (k) => state.memento?.[k], update: async (k, v) => ((state.memento ??= {})[k] = v) };
+    ext.activate({ subscriptions: [], extensionUri: vscode.Uri.file(extDir), globalState });
 
     const provider = state.providers['claudeSessions.list'];
     assert.ok(provider, 'sidebar webview provider registered');
@@ -282,6 +284,51 @@ test('bundled extension activates, fills the sidebar, and renders a transcript',
     await state.commands['claudeSessions.continueInNewSession']({ ...sessionA, title: 'Continued: Continued: Session aaaa' });
     await new Promise((r) => setTimeout(r, 300));
     assert.deepEqual(state.terminals.pop().shellArgs.slice(0, 2), ['--name', 'Continued: Session aaaa']);
+
+    // Message box: the page says where it sends; sending resumes this session with the message as one argument.
+    const composerData = (html) =>
+      JSON.parse(/data-composer="([^"]*)"/.exec(html)[1].replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&'));
+    const box = composerData(state.panels[0].webview.html);
+    assert.equal(box.target, 'claude', "the session's own tool by default");
+    assert.deepEqual(box.targets.map((t) => [t.id, t.same]), [['claude', true], ['copilot-cli', false], ['vscode-chat', false]]);
+    assert.equal(box.context, 0);
+    assert.equal(typeof box.cacheExpires, 'number', 'when the prompt cache lapses, for the default');
+    assert.equal(typeof box.contextTokens, 'number', 'and how big the conversation is');
+    state.config = { ...(state.config ?? {}), closeTranscriptOnResume: false };
+    const sendBox = async (msg) => {
+      state.panelPosts.length = 0;
+      await state.panels[0].onMessage({ command: 'send', ...msg });
+      await new Promise((r) => setTimeout(r, 300));
+      return state.panelPosts.map((m) => m.type).filter((t) => t === 'sent' || t === 'sendFailed').pop();
+    };
+    assert.equal(await sendBox({ text: 'Add tests\nfor it', target: 'claude', mode: 'same' }), 'sent');
+    const rt = state.terminals.pop();
+    assert.equal(rt.shellPath, 'claude');
+    assert.deepEqual(rt.shellArgs, ['--resume', 'bbbb', 'Add tests\nfor it']);
+    assert.equal(rt.sent, undefined, 'nothing typed into a shell');
+    // A new session with a handoff that ends with the message.
+    assert.equal(await sendBox({ text: 'Next step', target: 'claude', mode: 'handoff' }), 'sent');
+    const ht = state.terminals.pop();
+    assert.deepEqual(ht.shellArgs.slice(0, 2), ['--name', 'Continued: Session bbbb']);
+    assert.match(ht.shellArgs[2], /Carry on with my next request:\n\nNext step$/);
+    // VS Code Chat can't take a message into this session, so it gets a handoff, sent at once; and is remembered.
+    let chatOpen;
+    state.commands['workbench.action.chat.newChat'] = () => {};
+    state.commands['workbench.action.chat.open'] = (o) => (chatOpen = o);
+    assert.equal(await sendBox({ text: 'Over to chat', target: 'vscode-chat', mode: 'same' }), 'sent');
+    assert.equal(chatOpen.isPartialQuery, false);
+    assert.match(chatOpen.query, /Over to chat$/);
+    assert.equal(state.memento['composerTarget.claude'], 'vscode-chat');
+    await state.panels[0].onMessage({ command: 'refresh' });
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal(composerData(state.panels[0].webview.html).target, 'vscode-chat', 'the last tool chosen is the next default');
+    // Nothing to send, or an unknown target: nothing happens and the page keeps the text.
+    assert.equal(await sendBox({ text: '   ', target: 'claude', mode: 'same' }), 'sendFailed');
+    assert.equal(await sendBox({ text: 'x', target: 'nope', mode: 'same' }), 'sendFailed');
+    assert.equal(state.terminals.length, 0);
+    delete state.config.closeTranscriptOnResume;
+    delete state.memento['composerTarget.claude'];
+    assert.deepEqual(state.errors, []);
 
     // Overview: one editor tab, filled when its page is ready, for the range the page asks for.
     await state.commands['claudeSessions.openOverview']();

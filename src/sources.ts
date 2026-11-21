@@ -55,6 +55,16 @@ export const SOURCES: Record<SessionSource, SourceInfo> = {
 /** Group label for sessions with no known folder (VS Code chats in an empty window, for example). */
 export const NO_FOLDER = 'No folder';
 
+/** Where a session can be continued: one of the tools, or the Claude Code extension's chat (vs its CLI). */
+export type ContinueTarget = SessionSource | 'claude-chat';
+export const CONTINUE_TARGETS: ContinueTarget[] = [...SOURCE_IDS, 'claude-chat'];
+
+/** Whether a message can go to this same session in `target`, rather than to a new one with a handoff. */
+export function canResumeIn(source: SessionSource, target: ContinueTarget): boolean {
+  // VS Code Chat can reopen a saved chat but not put a message into it, so it always takes a handoff.
+  return source === 'claude' ? target === 'claude' || target === 'claude-chat' : source === 'copilot-cli' && target === 'copilot-cli';
+}
+
 /** A session's source; sessions built without one (by commands' callers, say) are Claude Code's. */
 export const sourceOf = (s: SessionInfo): SessionSource => s.source ?? 'claude';
 
