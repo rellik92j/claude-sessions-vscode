@@ -10,7 +10,7 @@ import { GroupBy, projectName, projectPath, SessionModel, workspaceFolderPaths }
 import { isEmptyQuery, parseQuery } from './query';
 import { SessionInfo, SessionSource } from './sessionParser';
 import { defaultCopilotDir, defaultProjectsDir, defaultVsCodeUserDirs, SessionStore, SourceRoots, sortTime, writeCustomTitle } from './sessionStore';
-import { isClaude, sessionKey, SOURCE_IDS, SOURCES, sourceOf, toSources } from './sources';
+import { canResumeIn, CONTINUE_TARGETS, ContinueTarget, isClaude, sessionKey, SOURCE_IDS, SOURCES, sourceOf, toSources } from './sources';
 import { parseTranscriptFor } from './transcripts';
 import { OverviewPanel } from './overviewPanel';
 import { SidebarView } from './sidebarView';
@@ -98,7 +98,10 @@ function gitStatus(cwd: string): Promise<string | undefined> {
 export function activate(context: vscode.ExtensionContext): void {
   const store = new SessionStore(projectsDir(), sourceRoots());
   const model = new SessionModel(store);
-  const transcripts = new TranscriptPanels(context.extensionUri, hasClaudeCode, model);
+  // The tool last chosen in a transcript's message box, per kind of session; it is where the next message goes.
+  const composerKey = (s: SessionSource) => `composerTarget.${s}`;
+  const composerTarget = (s: SessionSource) => context.globalState?.get<ContinueTarget>(composerKey(s));
+  const transcripts = new TranscriptPanels(context.extensionUri, hasClaudeCode, model, composerTarget);
   const overview = new OverviewPanel(context.extensionUri, model);
 
   /**
@@ -262,7 +265,7 @@ export function activate(context: vscode.ExtensionContext): void {
    * Resumes the session in its own tool. This and the other actions below resolve to true once the session (or its
    * continuation) has opened, so the transcript it was started from can close; false when cancelled or refused.
    */
-  const resume = async (session: SessionInfo): Promise<boolean> => {
+  const resume = async (session: SessionInfo, message?: string): Promise<boolean> => {
     if (sourceOf(session) === 'vscode-chat') {
       return openChat(session);
     }
@@ -270,6 +273,11 @@ export function activate(context: vscode.ExtensionContext): void {
     const existing = sessionTerminals.get(key);
     if (existing && existing.exitStatus === undefined) {
       existing.show();
+      if (message) {
+        // Typing into a running CLI would send a multi-line message a line at a time, so it is handed over instead.
+        await vscode.env.clipboard.writeText(message);
+        vscode.window.showInformationMessage('This session is already open in a terminal. Your message is on the clipboard: paste it there.');
+      }
       return true;
     }
     const tool = SOURCES[sourceOf(session)].label;
@@ -294,6 +302,114 @@ export function activate(context: vscode.ExtensionContext): void {
   };
 
   /**
+   * Resumes a CLI session with `message` as its next prompt, sent at once. Claude Code runs as the terminal's own
+   * process so the message arrives as one argument, as in continueInNewSession; Copilot CLI is often a shell shim
+   * (see continueInCopilot), so a message that won't survive shell quoting goes in a file its prompt points at.
+   */
+  const resumeWithMessage = async (session: SessionInfo, message: string, overrides: Overrides): Promise<boolean> => {
+    const key = sessionKey(session);
+    const existing = sessionTerminals.get(key);
+    if (existing && existing.exitStatus === undefined) {
+      return resume(session, message);
+    }
+    const tool = SOURCES[sourceOf(session)].label;
+    const cwd = projectPath(session);
+    const hasCwd = !!cwd && existsSync(cwd);
+    if (!hasCwd) {
+      vscode.window.showWarningMessage(
+        `The session's folder no longer exists (${cwd || 'unknown'}). ${tool} looks sessions up by folder, so resuming may fail.`,
+      );
+    }
+    const name = `${tool} · ${session.title.slice(0, 40)}`;
+    let terminal: vscode.Terminal;
+    if (isClaude(session)) {
+      const [shellPath, ...shellArgs] = claudeCommandParts();
+      terminal = vscode.window.createTerminal({
+        ...claudeTerminalOptions(name, hasCwd ? cwd : undefined),
+        shellPath,
+        shellArgs: [
+          ...shellArgs,
+          '--resume',
+          session.id,
+          ...(overrides.model ? ['--model', overrides.model] : []),
+          ...(overrides.effort ? ['--effort', overrides.effort] : []),
+          message,
+        ],
+      });
+    } else {
+      const quote = (s: string) => `"${s}"`;
+      let prompt = message;
+      const extra: string[] = [];
+      if (/["\r\n%`$]/.test(message) || message.length > 500) {
+        const dir = path.join(os.tmpdir(), 'claude-sessions-handoffs');
+        const file = path.join(dir, `message-${Date.now()}.md`);
+        try {
+          await fs.mkdir(dir, { recursive: true });
+          await fs.writeFile(file, message, 'utf8');
+        } catch (err) {
+          vscode.window.showErrorMessage(`Could not write the message: ${(err as Error).message}`);
+          return false;
+        }
+        extra.push('--add-dir', quote(dir));
+        prompt = `My next message is in ${file}. Read it and do what it asks.`;
+      }
+      const command = config().get<string>('copilotCommand', 'copilot') || 'copilot';
+      const args = [
+        '--resume',
+        session.id,
+        ...extra,
+        ...(overrides.model ? ['--model', quote(overrides.model)] : []),
+        ...(overrides.effort ? ['--reasoning-effort', overrides.effort] : []),
+        '-i',
+        quote(prompt),
+      ];
+      terminal = vscode.window.createTerminal(
+        claudeTerminalOptions(name, hasCwd ? cwd : undefined, new vscode.ThemeIcon(SOURCES['copilot-cli'].icon)),
+      );
+      terminal.sendText(`${command} ${args.join(' ')}`);
+    }
+    sessionTerminals.set(key, terminal);
+    terminal.show();
+    return true;
+  };
+
+  /**
+   * Sends what was typed in a transcript's message box: as the next prompt of this same session where its tool can
+   * take one, otherwise as the request at the end of a handoff to a new session in `target`. The CLIs send it at once,
+   * as does VS Code Chat; the Claude Code chat can only place it in its input box. `pickModel` asks for a model and
+   * effort first (CLIs only). Resolves to true once it has gone, so the transcript can close.
+   */
+  const sendMessage = async (
+    session: SessionInfo,
+    text: string,
+    target: ContinueTarget,
+    mode: 'same' | 'handoff',
+    pickModel = false,
+  ): Promise<boolean> => {
+    const own = sourceOf(session);
+    if (!CONTINUE_TARGETS.includes(target) || !text.trim()) {
+      return false;
+    }
+    if (target === 'claude-chat' && !hasClaudeCode()) {
+      vscode.window.showErrorMessage('The Claude Code extension (anthropic.claude-code) is not installed.');
+      return false;
+    }
+    let overrides: Overrides = {};
+    if (pickModel && target !== 'vscode-chat' && target !== 'claude-chat') {
+      const picked = await pickOverrides(session, target, 'Send');
+      if (!picked) {
+        return false;
+      }
+      overrides = picked;
+    }
+    await context.globalState?.update(composerKey(own), target);
+    if (mode === 'same' && canResumeIn(own, target)) {
+      return target === 'claude-chat' ? openInClaudeCode(session, text) : resumeWithMessage(session, text, overrides);
+    }
+    return continueInNewSession(session, overrides, target, text);
+  };
+
+  /**
    * Starts a new session in `target` (by default the session's own tool) whose first prompt is a handoff of where this
    * one left off. `overrides` (model, effort) apply to the CLIs; the chats (VS Code Chat, the Claude Code extension's
    * chat) use their own model pickers.
@@ -302,6 +418,7 @@ export function activate(context: vscode.ExtensionContext): void {
     session: SessionInfo,
     overrides: Overrides = {},
     target: ContinueTarget = sourceOf(session),
+    request?: string,
   ): Promise<boolean> => {
     if (target === 'claude-chat' && !hasClaudeCode()) {
       vscode.window.showErrorMessage('The Claude Code extension (anthropic.claude-code) is not installed.');
@@ -324,11 +441,11 @@ export function activate(context: vscode.ExtensionContext): void {
     facts.handoffNotes = facts.handoffNotes?.filter((n) => /^https?:/.test(n) || statSync(n, { throwIfNoEntry: false })?.isFile());
     // The Claude Code chat is the same assistant as its CLI, so it gets the same handoff.
     const tool: SessionSource = target === 'claude-chat' ? 'claude' : target;
-    const handoff = buildHandoff(session, facts, cwd || undefined, hasCwd ? await gitStatus(cwd) : undefined, tool);
+    const handoff = buildHandoff(session, facts, cwd || undefined, hasCwd ? await gitStatus(cwd) : undefined, tool, request);
     // Continuing a continued session keeps one "Continued: " rather than stacking them.
     const title = session.title.replace(/^(Continued: )+/, '');
     if (target === 'vscode-chat') {
-      return continueInChat(session, handoff);
+      return continueInChat(session, handoff, !!request);
     }
     if (target === 'claude-chat') {
       return continueInClaudeChat(session, handoff);
@@ -391,10 +508,13 @@ export function activate(context: vscode.ExtensionContext): void {
     return true;
   };
 
-  /** A new VS Code chat in agent mode with the handoff in its input box, for you to review, pick a model and send. */
-  const continueInChat = async (session: SessionInfo, handoff: string): Promise<boolean> => {
+  /**
+   * A new VS Code chat in agent mode with the handoff in its input box, for you to review, pick a model and send; or,
+   * with `send` (the handoff ends with a request from the message box), sent straight away.
+   */
+  const continueInChat = async (session: SessionInfo, handoff: string, send = false): Promise<boolean> => {
     await vscode.commands.executeCommand('workbench.action.chat.newChat');
-    await vscode.commands.executeCommand('workbench.action.chat.open', { mode: 'agent', query: handoff, isPartialQuery: true });
+    await vscode.commands.executeCommand('workbench.action.chat.open', { mode: 'agent', query: handoff, isPartialQuery: !send });
     const cwd = projectPath(session);
     if (cwd && !workspaceFolderPaths().some((f) => isInside(cwd, f))) {
       vscode.window.showInformationMessage(
@@ -424,7 +544,8 @@ export function activate(context: vscode.ExtensionContext): void {
     return true;
   };
 
-  const openInClaudeCode = async (session: SessionInfo): Promise<boolean> => {
+  /** Opens the session in the Claude Code chat; `message` goes in its input box (the extension doesn't send it). */
+  const openInClaudeCode = async (session: SessionInfo, message?: string): Promise<boolean> => {
     if (!vscode.extensions.getExtension(CLAUDE_CODE_EXTENSION)) {
       vscode.window.showErrorMessage('The Claude Code extension (anthropic.claude-code) is not installed.');
       return false;
@@ -437,13 +558,13 @@ export function activate(context: vscode.ExtensionContext): void {
         'Try Anyway',
       );
       if (choice === 'Resume in Terminal Instead') {
-        return resume(session);
+        return message ? resumeWithMessage(session, message, {}) : resume(session);
       }
       if (choice !== 'Try Anyway') {
         return false;
       }
     }
-    await vscode.commands.executeCommand('claude-vscode.editor.open', session.id);
+    await vscode.commands.executeCommand('claude-vscode.editor.open', session.id, message);
     return true;
   };
 
@@ -526,7 +647,12 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('claudeSessions.groupByDate', () => setConfig('groupBy', 'date')),
     vscode.commands.registerCommand('claudeSessions.showCurrentWorkspaceOnly', () => setConfig('currentWorkspaceOnly', true)),
     vscode.commands.registerCommand('claudeSessions.showAll', () => setConfig('currentWorkspaceOnly', false)),
-    vscode.commands.registerCommand('claudeSessions.resume', withSession(resume)),
+    vscode.commands.registerCommand('claudeSessions.resume', withSession((s) => resume(s))),
+    // From a transcript's message box: (session, text, target, mode, pickModel). Not in the command palette.
+    vscode.commands.registerCommand('claudeSessions.sendMessage', (arg: unknown, text: unknown, target: unknown, mode: unknown, pickModel: unknown) => {
+      const s = toSession(arg);
+      return !!s && typeof text === 'string' && sendMessage(s, text, target as ContinueTarget, mode === 'same' ? 'same' : 'handoff', pickModel === true);
+    }),
     vscode.commands.registerCommand('claudeSessions.continueInNewSession', withSession((s) => continueInNewSession(s))),
     vscode.commands.registerCommand(
       'claudeSessions.continueInNewSessionWithModel',
@@ -588,7 +714,7 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 /** Where a session can continue: a tool whose sessions are listed, or the Claude Code extension's chat. */
-type ContinueTarget = SessionSource | 'claude-chat';
+
 
 /** CLI flags for a new session; undefined fields keep the user's Claude Code settings. */
 interface Overrides {

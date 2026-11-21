@@ -105,6 +105,16 @@ You'll find these on each card and at the top of each transcript. This is how th
 - **Continue in New Session with Tool or Model…** does the same, but first asks where the new session runs: the Claude Code CLI, Claude Code Chat (the Claude Code extension's chat tab, offered when that extension is installed), GitHub Copilot CLI or VS Code Chat. For a CLI it then asks which model and effort level to use, instead of that CLI's settings. The two chats open with the handoff in the input box, so you can pick a model there and press Enter. This also lets you move work between tools, for example from a Copilot chat to Claude Code. Find it in a card's right-click menu, or click the ⌄ next to **Continue in new session** in a transcript.
 - **Open in Claude Code Chat** reopens the session in the chat panel of the official Claude Code extension, if you have it installed.
 
+#### Reply from the transcript
+
+At the bottom of every transcript there's a message box. Type what you want next and press Enter (Shift+Enter adds a line). The line under the box always says what will happen:
+
+- Normally your message goes to **this session**: it resumes in the Claude Code CLI (or Copilot CLI) with your message sent straight away.
+- When resuming isn't a good idea, it starts **a new session with a handoff** instead, and the handoff ends with your message rather than asking Claude to wait. That happens when the session's prompt cache has expired and its context holds 100k tokens or more, because resuming then pays to cache the whole conversation again while a handoff starts small, or when its context is 80% full or more. While the cache is still warm, or the conversation is smaller, resuming is the cheaper way on, so that's the default. VS Code Chat can't take a message into an existing chat, so a VS Code Chat session always gets a handoff.
+- The ⌃ next to **Send** changes both: this session or a new one, and which tool (Claude Code CLI, Claude Code chat, GitHub Copilot CLI or VS Code Chat). **Send with a model and effort…** asks for those first, for the CLIs. The tool you pick is remembered for that kind of session.
+
+The CLIs and VS Code Chat send your message at once. The Claude Code chat can only put it in its input box, so press Enter there. Once it's sent, the transcript tab closes, as it does after **Resume** (see `claudeSessions.closeTranscriptOnResume`). If the session is already running in one of SessionsAI's terminals, that terminal comes forward and your message is copied to the clipboard to paste there. An unsent message stays in the box when you reload the transcript.
+
 ### GitHub Copilot CLI and VS Code Chat sessions too
 
 The sidebar also lists your [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli) sessions and your VS Code Chat (GitHub Copilot Chat) conversations, next to your Claude Code sessions. Each card has a badge naming its tool. You can search all of them and read any of them as a transcript.
@@ -161,7 +171,7 @@ In the sidebar:
 | Enter | Open transcript |
 | Ctrl+Enter (Cmd+Enter on macOS) | Resume |
 
-In a transcript: F3 / Shift+F3 step through search matches, and Esc clears them.
+In a transcript: F3 / Shift+F3 step through search matches, and Esc clears them. In the message box, Enter sends and Shift+Enter adds a line.
 
 The **SessionsAI: Search Sessions…** command in the Command Palette searches transcripts too, **SessionsAI: Search Sessions for This File** searches for the file in the active editor, and **SessionsAI: Open Overview** opens the overview.
 

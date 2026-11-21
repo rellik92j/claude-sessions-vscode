@@ -2,7 +2,7 @@
   "name": "sessionsai",
   "displayName": "SessionsAI — Claude Code, Copilot, & VS Code Chat Manager",
   "description": "Browse, search, read and resume your Claude Code, GitHub Copilot CLI and VS Code Chat sessions from the VS Code sidebar.",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "publisher": "rellik92j",
   "icon": "media/icon.png",
   "license": "MIT",
@@ -420,7 +420,11 @@
         },
         "claudeSessions.transcriptLineWidth": {
           "type": "string",
-          "enum": ["full", "comfortable", "narrow"],
+          "enum": [
+            "full",
+            "comfortable",
+            "narrow"
+          ],
           "enumDescriptions": [
             "Text fills the transcript column, up to about 110 characters a line.",
             "Text stops at about 95 characters a line.",

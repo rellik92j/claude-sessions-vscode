@@ -59,6 +59,173 @@
     }
   });
 
+  // ---------- message box ----------
+
+  // Type the next message at the bottom of the transcript; it goes to this session or, when that isn't wise or
+  // possible, to a new session with a handoff that ends with it. The line under the box always says which.
+  const composer = document.getElementById('composer');
+  if (composer) {
+    const cfg = JSON.parse(composer.dataset.composer);
+    const input = document.getElementById('composer-input');
+    const sendBtn = document.getElementById('composer-send');
+    const moreBtn = document.getElementById('composer-more');
+    const menu = document.getElementById('composer-menu');
+    const status = document.getElementById('composer-status');
+    const key = document.body.dataset.session || '';
+    const drafts = saved.drafts || {};
+    let target = cfg.target;
+    /** Set when chosen in the menu; otherwise the default for the target. */
+    let chosenMode = null;
+    let sending = false;
+
+    const info = () => cfg.targets.find((t) => t.id === target) || cfg.targets[0];
+    /** An expired cache only tips the default to a handoff from this many tokens of context. */
+    const LARGE_CONTEXT = 100_000;
+    /**
+     * Why this session shouldn't simply be resumed, if there is a reason: a nearly full context, or an expired prompt
+     * cache on a large conversation, since resuming then pays to cache all of it again while a handoff starts small.
+     * While the cache is warm, or the conversation is small, resuming is the cheap way on.
+     */
+    const reason = () =>
+      cfg.context
+        ? `Context is ${cfg.context}% full.`
+        : cfg.cacheExpires && Date.now() >= cfg.cacheExpires && cfg.contextTokens >= LARGE_CONTEXT
+          ? `The prompt cache has expired, so resuming would pay to cache all ${Math.round(cfg.contextTokens / 1000)}k tokens again.`
+          : '';
+    const mode = () => (!info().same ? 'handoff' : chosenMode || (reason() ? 'handoff' : 'same'));
+
+    function describe() {
+      const t = info();
+      let text;
+      if (mode() === 'same') {
+        text = t.id === 'claude-chat' ? 'Opens this session in the Claude Code chat, with your message in its input box.' : `Resumes this session in ${t.label} and sends your message.`;
+      } else if (t.id === 'claude-chat') {
+        text = 'Opens a new Claude Code chat with a handoff of this session and your message in its input box.';
+      } else {
+        text = `Starts a new session in ${t.label} with a handoff of this one, then sends your message.`;
+      }
+      const why = mode() === 'handoff' && !chosenMode ? (t.same ? reason() : cfg.targets[0].id === t.id ? `${t.label} can't take a message into an existing chat.` : '') : '';
+      status.innerHTML = `<i class="codicon codicon-${t.icon}"></i><span>${esc(text)}</span>${why ? `<span class="why">${esc(why)}</span>` : ''}`;
+    }
+
+    function esc(s) {
+      return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+    }
+
+    function grow() {
+      input.style.height = 'auto';
+      input.style.height = `${input.scrollHeight}px`;
+      sendBtn.disabled = sending || !input.value.trim();
+    }
+
+    function saveDraft() {
+      if (input.value) drafts[key] = input.value;
+      else delete drafts[key];
+      saved.drafts = drafts;
+      vscode.setState({ ...saved });
+    }
+
+    function send(pickModel) {
+      const text = input.value.trim();
+      if (!text || sending) return;
+      sending = true;
+      sendBtn.disabled = true;
+      setMenu(false);
+      vscode.postMessage({ command: 'send', text, target, mode: mode(), pickModel: !!pickModel });
+    }
+
+    function renderMenu() {
+      const m = mode();
+      const t = info();
+      const item = (attrs, icon, label, on, disabled, title) =>
+        `<button role="menuitemradio" aria-checked="${on}" ${attrs}${disabled ? ' disabled' : ''}${title ? ` title="${esc(title)}"` : ''}><i class="codicon codicon-${on ? 'check' : icon}"></i><span>${esc(label)}</span></button>`;
+      menu.innerHTML =
+        `<div class="menu-label">Send to</div>` +
+        item('data-mode="same"', 'blank', 'This session', m === 'same', !t.same, t.same ? '' : `${t.label} can't continue this session`) +
+        item('data-mode="handoff"', 'blank', 'A new session, with a handoff', m === 'handoff', false) +
+        `<div class="menu-label">In</div>` +
+        cfg.targets.map((x) => item(`data-target="${x.id}"`, x.icon, x.label, x.id === target, false)).join('') +
+        (t.cli ? `<div class="menu-sep"></div><button role="menuitem" data-pick-model${input.value.trim() ? '' : ' disabled'}><i class="codicon codicon-settings"></i><span>Send with a model and effort…</span></button>` : '');
+    }
+
+    function setMenu(open) {
+      menu.hidden = !open;
+      moreBtn.setAttribute('aria-expanded', String(open));
+      if (open) {
+        renderMenu();
+        menu.querySelector('button:not([disabled])')?.focus();
+      }
+    }
+
+    menu.addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (!b || b.disabled) return;
+      if ('pickModel' in b.dataset) {
+        send(true);
+        return;
+      }
+      if (b.dataset.mode) chosenMode = b.dataset.mode;
+      if (b.dataset.target) {
+        target = b.dataset.target;
+        if (!info().same) chosenMode = null;
+      }
+      renderMenu();
+      describe();
+      input.focus();
+    });
+    menu.addEventListener('keydown', (e) => {
+      const items = Array.from(menu.querySelectorAll('button:not([disabled])'));
+      const i = items.indexOf(document.activeElement);
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        setMenu(false);
+        moreBtn.focus();
+      } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus();
+      }
+    });
+    moreBtn.addEventListener('click', () => setMenu(menu.hidden));
+    document.addEventListener('click', (e) => {
+      if (!menu.hidden && !e.target.closest('#composer-menu, #composer-more')) setMenu(false);
+    });
+
+    input.addEventListener('input', () => {
+      grow();
+      saveDraft();
+    });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        send(false);
+      }
+    });
+    sendBtn.addEventListener('click', () => send(false));
+
+    window.addEventListener('message', (e) => {
+      if (e.data?.type === 'sent') {
+        sending = false;
+        input.value = '';
+        saveDraft();
+        grow();
+      } else if (e.data?.type === 'sendFailed') {
+        // Cancelled or refused: the text stays, ready to send again.
+        sending = false;
+        grow();
+        input.focus();
+      }
+    });
+
+    // The cache can lapse while the tab is open, which changes the default.
+    setInterval(describe, 30_000);
+    input.value = drafts[key] || '';
+    document.body.classList.add('has-composer');
+    describe();
+    grow();
+    // The jump-to-latest button sits just above the box, whatever its height.
+    new ResizeObserver(() => document.body.style.setProperty('--composer-h', `${composer.offsetHeight}px`)).observe(composer);
+  }
+
   // ---------- session details side panel ----------
 
   /**

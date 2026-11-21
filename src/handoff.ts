@@ -453,7 +453,8 @@ function fileList(files: string[], cwd: string | undefined, max: number): string
 
 /**
  * The prompt that starts the new session in `target` (by default the session's own tool). It ends by asking for a
- * summary and a wait, because the CLIs send a prompt given on the command line straight away.
+ * summary and a wait, because the CLIs send a prompt given on the command line straight away; given a `request`
+ * (typed in the transcript's message box), it ends with that instead, so the new session gets on with it.
  */
 export function buildHandoff(
   session: SessionInfo,
@@ -461,14 +462,19 @@ export function buildHandoff(
   cwd: string | undefined,
   gitStatus?: string,
   target: SessionSource = sourceOf(session),
+  request?: string,
 ): string {
+  const ask = request?.trim() || undefined;
   for (const lim of LIMITS) {
-    const text = render(session, facts, cwd, gitStatus, lim, target);
+    const text = render(session, facts, cwd, gitStatus, lim, target, ask);
     if (text.length <= MAX_HANDOFF) {
       return text;
     }
   }
-  return clip(render(session, facts, cwd, gitStatus, LIMITS[LIMITS.length - 1], target), MAX_HANDOFF - 10);
+  // Clipping would cut the request off the end, so a request that long goes in whole, after the smallest summary.
+  return ask
+    ? render(session, facts, cwd, gitStatus, LIMITS[LIMITS.length - 1], target, ask)
+    : clip(render(session, facts, cwd, gitStatus, LIMITS[LIMITS.length - 1], target), MAX_HANDOFF - 10);
 }
 
 function render(
@@ -478,6 +484,7 @@ function render(
   gitStatus: string | undefined,
   lim: Limits,
   target: SessionSource,
+  request?: string,
 ): string {
   const about = [`"${session.title}"`, session.gitBranch && `on branch ${session.gitBranch}`, session.prUrl && `PR ${session.prUrl}`]
     .filter(Boolean)
@@ -536,8 +543,12 @@ function render(
   }
   out.push(
     `The full earlier transcript is at ${session.filePath} (session ${session.id}) if you need more detail.\n\n` +
-      (latest ? 'First read the handoff notes named at the top. Then, before changing anything, ' : 'Before changing anything, ') +
-      'briefly summarise where things stand and what you think the next step is, then wait for my instruction.',
+      (request
+        ? `${latest ? 'First read the handoff notes named at the top. Then carry on' : 'Carry on'} with my next request:
+
+${request}`
+        : (latest ? 'First read the handoff notes named at the top. Then, before changing anything, ' : 'Before changing anything, ') +
+          'briefly summarise where things stand and what you think the next step is, then wait for my instruction.'),
   );
   return out.join('\n\n');
 }
