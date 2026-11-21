@@ -180,6 +180,7 @@ The **SessionsAI: Search Sessions…** command in the Command Palette searches t
 | `claudeSessions.copilotCommand` | `copilot` | Command used to launch GitHub Copilot CLI when resuming or continuing. |
 | `claudeSessions.terminalLocation` | `editor` | Open CLI terminals as an `editor` tab or in the bottom `panel`. |
 | `claudeSessions.showThinking` | `false` | Show Claude's thinking blocks in transcripts. |
+| `claudeSessions.transcriptLineWidth` | `full` | How wide transcript text gets: `full` (the whole column), `comfortable` (about 95 characters) or `narrow` (about 75). Code and tool output always use the full column. |
 | `claudeSessions.reuseTranscriptTab` | `true` | Reuse one preview tab for transcripts. When off, every transcript gets its own tab. |
 | `claudeSessions.closeTranscriptOnResume` | `true` | Close a transcript tab when you resume, continue or open its session from it. |
 

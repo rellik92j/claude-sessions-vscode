@@ -14,14 +14,34 @@
 
   const LIVE_MS = 3 * 60 * 1000;
 
+  /** Search syntax shown in the filter help: [what gets inserted, what it does], both already HTML-safe. */
+  const SEARCH_FILTERS = [
+    ['&quot;&quot;', 'Exact phrase, typed between the quotes'],
+    ['-', 'Leave out the word that follows'],
+    ['OR', 'Either the word before or after'],
+    ['file:', 'Changed a file with this in its path'],
+    ['skill:', 'Used a skill with this in its name'],
+    ['has:commits', 'Made git commits'],
+    ['has:pr', 'Opened a pull request'],
+    ['has:edits', 'Changed files'],
+  ];
+
   const app = document.getElementById('app');
   app.innerHTML = `
     <header class="toolbar">
       <label class="search">
         <i class="codicon codicon-search"></i>
-        <input id="q" type="text" placeholder="Search sessions and transcripts" title="Search titles, prompts and transcripts. &quot;exact phrase&quot;, -word to exclude, a OR b for either. Claude Code sessions also take file:name (changed that file), skill:name, and has:commits, has:pr or has:edits." spellcheck="false" aria-label="Search sessions and transcripts" />
+        <input id="q" type="text" placeholder="Search sessions and transcripts" spellcheck="false" aria-label="Search sessions and transcripts" />
         <button class="icon-btn clear" id="clear" title="Clear (Esc)" aria-label="Clear search"><i class="codicon codicon-close"></i></button>
+        <button class="icon-btn" id="help-toggle" title="Search filters" aria-label="Search filters" aria-expanded="false" aria-controls="search-help"><i class="codicon codicon-question"></i></button>
       </label>
+      <div class="search-help" id="search-help" hidden>
+        <p>Click a filter to add it to the search.</p>
+        <ul>
+          ${SEARCH_FILTERS.map(([insert, desc]) => `<li><button data-insert="${insert}"><code>${insert}</code></button><span>${desc}</span></li>`).join('')}
+        </ul>
+        <p class="note">file:, skill: and has: are for Claude Code sessions. Start one with - for the opposite: -has:pr.</p>
+      </div>
       <div class="controls">
         <div class="segmented" role="radiogroup" aria-label="Group sessions by">
           <button role="radio" data-group="project" title="Group by project"><i class="codicon codicon-folder"></i><span>Projects</span></button>
@@ -457,6 +477,41 @@
       }
     }
   });
+  // ---------- search filter help ----------
+
+  const $help = document.getElementById('search-help');
+  const $helpToggle = document.getElementById('help-toggle');
+  function setHelp(open) {
+    $help.hidden = !open;
+    $helpToggle.setAttribute('aria-expanded', String(open));
+    $helpToggle.classList.toggle('active', open);
+  }
+  $helpToggle.addEventListener('click', (e) => {
+    e.preventDefault(); // the button sits inside the search <label>, which would otherwise refocus the input
+    setHelp($help.hidden);
+  });
+  // Adds the filter at the end of the query and leaves the cursor where the rest gets typed.
+  $help.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-insert]');
+    if (!b) return;
+    const term = b.dataset.insert;
+    const before = $q.value.replace(/\s+$/, '');
+    const lead = before ? `${before} ` : '';
+    const complete = term.startsWith('has:') || term === 'OR';
+    $q.value = lead + term + (complete ? ' ' : '');
+    const caret = term === '""' ? $q.value.length - 1 : $q.value.length;
+    $q.focus();
+    $q.setSelectionRange(caret, caret);
+    $q.dispatchEvent(new Event('input'));
+  });
+  $help.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      setHelp(false);
+      $helpToggle.focus();
+    }
+  });
+
   document.getElementById('clear').addEventListener('click', () => {
     $q.value = '';
     query = '';

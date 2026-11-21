@@ -190,6 +190,9 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       applyConfig();
+      if (e.affectsConfiguration(`${CONFIG}.transcriptLineWidth`)) {
+        transcripts.applyLineWidth();
+      }
       if (e.affectsConfiguration(`${CONFIG}.sources`)) {
         applySources();
       }

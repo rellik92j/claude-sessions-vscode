@@ -199,8 +199,19 @@ test('bundled extension activates, fills the sidebar, and renders a transcript',
     handler({ type: 'run', command: 'openTranscript', id: 'aaaa-1111', highlight: ['const', 42] });
     await new Promise((r) => setTimeout(r, 100));
     assert.equal(state.panels.length, 1, 'existing panel reused');
-    assert.match(state.panels[0].webview.html, /<body data-highlight="\[&quot;const&quot;\]">/);
+    assert.match(state.panels[0].webview.html, /<body class="line-full" data-session="[^"]*" data-highlight="\[&quot;const&quot;\]">/);
     assert.deepEqual(state.errors, []);
+
+    // The transcriptLineWidth setting becomes a class on the page; an unknown value falls back to full.
+    state.config = { ...(state.config ?? {}), transcriptLineWidth: 'narrow' };
+    handler({ type: 'run', command: 'openTranscript', id: 'aaaa-1111' });
+    await new Promise((r) => setTimeout(r, 100));
+    assert.match(state.panels[0].webview.html, /<body class="line-narrow"/);
+    state.config.transcriptLineWidth = 'huge';
+    handler({ type: 'run', command: 'openTranscript', id: 'aaaa-1111' });
+    await new Promise((r) => setTimeout(r, 100));
+    assert.match(state.panels[0].webview.html, /<body class="line-full"/);
+    delete state.config.transcriptLineWidth;
 
     // Transcripts share one preview tab until kept open (Keep open button, or keepOpen from a double-click).
     const open = (id, ...args) =>

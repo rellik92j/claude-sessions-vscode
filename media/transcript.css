@@ -12,9 +12,15 @@
   --purple: var(--vscode-charts-purple, #b180d7);
   --mono: var(--vscode-editor-font-family, ui-monospace, monospace);
   --content: 860px;
+  /* Widest a line of prose gets, from the transcriptLineWidth setting; code, tables and tool output keep the full
+     column. "ch" is the width of a zero, so 80ch is about 95 characters of ordinary text and 64ch about 75. */
+  --measure: none;
 }
 
 * { box-sizing: border-box; }
+
+body.line-comfortable { --measure: 80ch; }
+body.line-narrow { --measure: 64ch; }
 
 body {
   margin: 0;
@@ -36,6 +42,8 @@ button { font: inherit; color: inherit; }
   position: sticky;
   top: 0;
   z-index: 10;
+  /* The buttons respond to the bar's own width, which the docked side panel narrows, not the window's. */
+  container: topbar / inline-size;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -149,7 +157,12 @@ body.hero-hidden .topbar { box-shadow: none; background: var(--vscode-editor-bac
 }
 .icon-btn:hover { background: var(--vscode-toolbar-hoverBackground, var(--subtle-2)); }
 
-@media (max-width: 560px) {
+/* As the bar narrows, buttons drop their labels (the tooltips still name them): the secondary ones first, then Resume. */
+@container topbar (max-width: 900px) {
+  .btn:not(.primary) span { display: none; }
+  .btn:not(.primary) { padding: 0 8px; }
+}
+@container topbar (max-width: 520px) {
   .btn span { display: none; }
   .btn { padding: 0 8px; }
 }
@@ -202,7 +215,7 @@ body.hero-hidden .topbar { box-shadow: none; background: var(--vscode-editor-bac
   background: var(--subtle);
   min-width: 0;
 }
-.stat-label { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.stat-label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
 .stat-label .codicon { font-size: 13px; }
 .stat-value { margin-top: 2px; font-size: 1.25em; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stat-value span { font-size: 0.75em; font-weight: 400; color: var(--muted); }
@@ -274,7 +287,9 @@ body.hero-hidden .topbar { box-shadow: none; background: var(--vscode-editor-bac
 .divider span { display: inline-flex; align-items: center; gap: 6px; }
 .divider.system { font-weight: 500; font-style: italic; }
 
-.msg { margin: 18px 0; animation: rise 0.25s ease-out both; }
+.msg { margin: 18px 0; }
+/* Only messages that arrived since the last reload of this session (see transcript.js). */
+.msg.new { animation: rise 0.3s ease-out both; }
 @keyframes rise { from { opacity: 0; transform: translateY(4px); } }
 
 .msg-meta {
@@ -340,6 +355,7 @@ body.hero-hidden .topbar { box-shadow: none; background: var(--vscode-editor-bac
 /* ---------- markdown ---------- */
 
 .md { overflow-wrap: anywhere; }
+.md > :is(p, ul, ol, blockquote, h1, h2, h3, h4, h5, h6) { max-width: var(--measure); }
 .md p { margin: 0.45em 0 0.7em; }
 .md h1, .md h2, .md h3, .md h4 { margin: 1.1em 0 0.4em; line-height: 1.3; font-weight: 650; }
 .md h1 { font-size: 1.3em; }
@@ -425,14 +441,12 @@ body.hero-hidden .topbar { box-shadow: none; background: var(--vscode-editor-bac
   align-items: center;
   gap: 6px;
   padding: 5px 12px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
   color: var(--muted);
   border-bottom: 1px solid var(--hairline);
 }
-.failed-count { color: var(--red); text-transform: none; letter-spacing: 0; }
+.failed-count { color: var(--red); }
 .tool + .tool { border-top: 1px solid var(--hairline); }
 
 .tool > summary {
@@ -462,13 +476,11 @@ body.hero-hidden .topbar { box-shadow: none; background: var(--vscode-editor-bac
   display: flex;
   gap: 8px;
   margin: 10px 0 4px;
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
   color: var(--muted);
 }
-.pane-label span { font-weight: 400; text-transform: none; letter-spacing: 0; opacity: 0.8; }
+.pane-label span { font-weight: 400; opacity: 0.8; }
 .tool-body pre {
   margin: 0;
   max-height: 380px;
@@ -595,13 +607,14 @@ mark.hit.current {
   transition: transform 0.2s, visibility 0.2s;
 }
 body.side-open .side { transform: none; visibility: visible; }
-/* Wide enough: the conversation moves over instead of being covered. */
-@media (min-width: 1100px) {
+/* Wide enough: the conversation moves over instead of being covered. 900px must match SIDE_DOCK_WIDTH in
+   transcript.js; it leaves the conversation about 550px, enough for a full line of prose. */
+@media (min-width: 900px) {
   body.side-open { padding-right: calc(var(--side) + 24px); }
   body.side-open .findbar { right: calc(var(--side) + 24px); }
   body.side-open .fab { right: calc(var(--side) + 24px); }
 }
-@media (max-width: 1099px) {
+@media (max-width: 899px) {
   body.side-open .side { box-shadow: -8px 0 24px -12px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.5)); }
 }
 #side-toggle.active { background: var(--vscode-toolbar-activeBackground, var(--subtle-2)); }
@@ -684,9 +697,8 @@ button.side-row:hover, a.side-row:hover { background: var(--vscode-list-hoverBac
   border-radius: 4px;
   background: color-mix(in srgb, var(--green) 18%, transparent);
   color: var(--green);
-  font-size: 10px;
+  font-size: 10.5px;
   font-weight: 600;
-  text-transform: uppercase;
 }
 .side-failed { flex: none; color: var(--red); font-size: 11px; font-weight: 500; }
 .side-num { flex: none; min-width: 16px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }

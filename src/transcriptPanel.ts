@@ -45,6 +45,14 @@ export class TranscriptPanels {
    * Opens the transcript; `highlight` words are marked and the page opens at the first match.
    * `keepOpen` opens it in (or turns the preview into) a regular tab instead of the preview tab.
    */
+  /** Applies a changed transcriptLineWidth setting to the open tabs without rebuilding them. */
+  applyLineWidth(): void {
+    const value = lineWidthSetting();
+    for (const tab of [...this.pinned.values(), ...(this.preview ? [this.preview] : [])]) {
+      tab.panel.webview.postMessage({ type: 'lineWidth', value });
+    }
+  }
+
   async open(session: SessionInfo, highlight: string[] = [], keepOpen = false): Promise<void> {
     const usePreview = !keepOpen && vscode.workspace.getConfiguration('claudeSessions').get<boolean>('reuseTranscriptTab', true);
     const key = sessionKey(session);
@@ -206,6 +214,7 @@ export class TranscriptPanels {
     panel.title = session.title;
     webview.html = buildHtml(session, entries, {
       showThinking,
+      lineWidth: lineWidthSetting(),
       highlight: tab.highlight,
       preview: tab.preview,
       insights,
@@ -353,8 +362,18 @@ function showCommit(session: SessionInfo, hash: string): void {
   });
 }
 
+/** The claudeSessions.transcriptLineWidth setting. */
+export type LineWidth = 'full' | 'comfortable' | 'narrow';
+
+export function lineWidthSetting(): LineWidth {
+  const v = vscode.workspace.getConfiguration('claudeSessions').get<string>('transcriptLineWidth', 'full');
+  return v === 'comfortable' || v === 'narrow' ? v : 'full';
+}
+
 interface HtmlOptions {
   showThinking: boolean;
+  /** How wide prose gets; full when omitted. */
+  lineWidth?: LineWidth;
   /** What the session did, for the side panel; collected from `entries` when omitted. */
   insights?: SessionInsights;
   /** Search words for transcript.js to mark. */
@@ -761,7 +780,7 @@ function renderSide(ins: SessionInsights, cwd: string): string {
         `<button class="icon-btn" data-cmd="searchSidebar" data-arg="${escapeHtml(searchValue('file', name))}" title="Find sessions that changed ${escapeHtml(name)}"><i class="codicon codicon-search"></i></button>` +
         `</span>`
       : '';
-    return `<li class="has-actions"><button class="side-row" data-cmd="openFile" data-arg="${arg}" title="Open ${arg}"><span class="side-main">${escapeHtml(name)}${f.written ? '<span class="side-tag">new</span>' : ''}</span><span class="side-sub">${escapeHtml(dir)}</span>${countBadge(f.count)}</button>${actions}</li>`;
+    return `<li class="has-actions"><button class="side-row" data-cmd="openFile" data-arg="${arg}" title="Open ${arg}"><span class="side-main">${escapeHtml(name)}${f.written ? '<span class="side-tag" title="Written whole in this session: created or overwritten">New</span>' : ''}</span><span class="side-sub">${escapeHtml(dir)}</span>${countBadge(f.count)}</button>${actions}</li>`;
   };
   const named = (n: { name: string; count: number }) =>
     `<li><div class="side-row static"><span class="side-main">${escapeHtml(n.name)}</span>${countBadge(n.count)}</div></li>`;
@@ -911,7 +930,7 @@ export function buildHtml(session: SessionInfo, entries: TranscriptEntry[], o: H
 <link rel="stylesheet" href="${o.css}">
 <title>${escapeHtml(session.title)}</title>
 </head>
-<body${o.highlight?.length ? ` data-highlight="${escapeHtml(JSON.stringify(o.highlight))}"` : ''}>
+<body class="line-${o.lineWidth ?? 'full'}" data-session="${escapeHtml(session.key || session.id || '')}"${o.highlight?.length ? ` data-highlight="${escapeHtml(JSON.stringify(o.highlight))}"` : ''}>
 <nav class="topbar">
   <div class="topbar-title"><span class="${claude ? 'claude-dot' : 'source-dot'}">${assistantMark(source)}</span><span>${escapeHtml(session.title)}</span></div>
   <div class="topbar-actions">

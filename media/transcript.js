@@ -19,7 +19,7 @@
         void target.offsetWidth;
         target.classList.add('flash');
       }
-      if (window.innerWidth < SIDE_OVERLAY_WIDTH) setSide(false);
+      if (!docked()) setSide(false);
       return;
     }
     const more = e.target.closest('[data-more]');
@@ -37,25 +37,60 @@
     }
   });
 
+  // ---------- new messages ----------
+
+  // The page is rebuilt on every reload, so only messages added since the last render of this same session get the
+  // entrance animation; opening a transcript, or switching this tab to another one, shows it still.
+  {
+    const msgs = document.querySelectorAll('.conversation .msg');
+    const key = document.body.dataset.session;
+    if (key && saved.seen?.key === key) {
+      for (let i = saved.seen.count; i < msgs.length; i++) msgs[i].classList.add('new');
+    }
+    saved.seen = { key, count: msgs.length };
+    vscode.setState({ ...saved });
+  }
+
+  // The transcriptLineWidth setting, changed while the tab is open.
+  window.addEventListener('message', (e) => {
+    if (e.data?.type === 'lineWidth') {
+      document.body.classList.remove('line-full', 'line-comfortable', 'line-narrow');
+      document.body.classList.add(`line-${e.data.value}`);
+    }
+  });
+
   // ---------- session details side panel ----------
 
-  /** Below this width the panel covers the conversation instead of sitting beside it, so it starts closed. */
-  const SIDE_OVERLAY_WIDTH = 1100;
+  /**
+   * From this width the panel sits beside the conversation, which moves over to make room (must match the
+   * min-width media query in transcript.css). Below it, the panel covers the conversation, so it starts closed
+   * and only opens on request; opening or closing it there isn't remembered for wider tabs.
+   */
+  const SIDE_DOCK_WIDTH = 900;
+  const docked = () => window.innerWidth >= SIDE_DOCK_WIDTH;
   const side = document.getElementById('side');
   const sideToggle = document.getElementById('side-toggle');
   function setSide(open, remember) {
     document.body.classList.toggle('side-open', open);
     sideToggle?.setAttribute('aria-expanded', String(open));
     sideToggle?.classList.toggle('active', open);
-    if (remember) {
+    if (remember && docked()) {
       saved.sideOpen = open;
       vscode.setState({ ...saved });
     }
   }
   if (side && sideToggle) {
-    setSide(saved.sideOpen ?? window.innerWidth >= SIDE_OVERLAY_WIDTH);
+    setSide(docked() && saved.sideOpen !== false);
     sideToggle.addEventListener('click', () => setSide(!document.body.classList.contains('side-open'), true));
     document.getElementById('side-close').addEventListener('click', () => setSide(false, true));
+    // A tab that narrows (an editor split, a smaller window) closes the panel rather than letting it cover the
+    // conversation; widening again brings back what was chosen while it was docked.
+    let wasDocked = docked();
+    window.addEventListener('resize', () => {
+      const now = docked();
+      if (now !== wasDocked) setSide(now && saved.sideOpen !== false);
+      wasDocked = now;
+    });
     // Which sections are expanded survives reloads of the tab.
     const sections = saved.sections || {};
     side.querySelectorAll('details[data-section]').forEach((d) => {

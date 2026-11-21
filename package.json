@@ -418,6 +418,17 @@
           "default": false,
           "description": "Include Claude's thinking blocks in the transcript view."
         },
+        "claudeSessions.transcriptLineWidth": {
+          "type": "string",
+          "enum": ["full", "comfortable", "narrow"],
+          "enumDescriptions": [
+            "Text fills the transcript column, up to about 110 characters a line.",
+            "Text stops at about 95 characters a line.",
+            "Text stops at about 75 characters a line, the easiest to read."
+          ],
+          "default": "full",
+          "description": "How wide paragraphs, lists and headings in transcripts can get. Code blocks, tables and tool output always use the full column."
+        },
         "claudeSessions.reuseTranscriptTab": {
           "type": "boolean",
           "default": true,
