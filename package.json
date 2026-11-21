@@ -111,6 +111,12 @@
         "icon": "$(pinned)"
       },
       {
+        "command": "claudeSessions.rename",
+        "title": "Rename Session…",
+        "category": "SessionsAI",
+        "icon": "$(edit)"
+      },
+      {
         "command": "claudeSessions.openRawFile",
         "title": "Open Raw Log",
         "category": "SessionsAI"
@@ -278,6 +284,11 @@
           "command": "claudeSessions.openPr",
           "when": "webviewId == 'claudeSessions.list' && webviewSection == 'session' && sessionHasPr",
           "group": "1_main@7"
+        },
+        {
+          "command": "claudeSessions.rename",
+          "when": "webviewId == 'claudeSessions.list' && webviewSection == 'session' && sessionSource == 'claude'",
+          "group": "2_other@0"
         },
         {
           "command": "claudeSessions.openRawFile",

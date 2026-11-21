@@ -570,3 +570,139 @@ mark.hit.current {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vscode-charts-blue, #3794ff) 35%, transparent);
 }
 .source-dot { display: inline-grid; place-items: center; color: var(--vscode-charts-blue, #3794ff); }
+
+/* ---------- session details side panel ---------- */
+
+:root { --side: 300px; }
+
+.side {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  width: var(--side);
+  max-width: 100vw;
+  overflow-y: auto;
+  padding: 0 0 24px;
+  border-left: 1px solid var(--hairline);
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  font-size: 12.5px;
+  line-height: 1.45;
+  transform: translateX(100%);
+  visibility: hidden;
+  transition: transform 0.2s, visibility 0.2s;
+}
+body.side-open .side { transform: none; visibility: visible; }
+/* Wide enough: the conversation moves over instead of being covered. */
+@media (min-width: 1100px) {
+  body.side-open { padding-right: calc(var(--side) + 24px); }
+  body.side-open .findbar { right: calc(var(--side) + 24px); }
+  body.side-open .fab { right: calc(var(--side) + 24px); }
+}
+@media (max-width: 1099px) {
+  body.side-open .side { box-shadow: -8px 0 24px -12px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.5)); }
+}
+#side-toggle.active { background: var(--vscode-toolbar-activeBackground, var(--subtle-2)); }
+
+.side-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 8px 8px 14px;
+  background: inherit;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.side-empty { padding: 12px 14px; color: var(--muted); }
+
+.side-section { border-bottom: 1px solid var(--hairline); }
+.side-section summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+  user-select: none;
+}
+.side-section summary::-webkit-details-marker { display: none; }
+.side-section summary::before {
+  content: '\eab6';
+  font-family: codicon;
+  font-size: 12px;
+  color: var(--muted);
+  transition: transform 0.15s;
+}
+.side-section[open] summary::before { transform: rotate(90deg); }
+.side-section summary:hover { background: var(--subtle); }
+.side-section summary > span:first-of-type { flex: 1; }
+.side-count {
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--subtle-2);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  text-align: center;
+}
+.side-list { list-style: none; margin: 0 0 6px; padding: 0; }
+.side-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 6px;
+  width: 100%;
+  padding: 3px 14px 3px 33px;
+  border: none;
+  background: none;
+  color: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.side-row.static { cursor: default; }
+button.side-row:hover, a.side-row:hover { background: var(--vscode-list-hoverBackground, var(--subtle)); }
+.side-main { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-sub { flex: 1 0 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11.5px; order: 3; }
+.side-sub:empty { display: none; }
+.side-sub code { font-family: var(--mono); font-size: 11px; }
+.side-badge { flex: none; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.side-tag {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--green) 18%, transparent);
+  color: var(--green);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.side-failed { flex: none; color: var(--red); font-size: 11px; font-weight: 500; }
+.side-num { flex: none; min-width: 16px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.side-section[data-section='prompts'] .side-row { padding-left: 14px; flex-wrap: nowrap; align-items: flex-start; }
+.side-section[data-section='prompts'] .side-main { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.side-more {
+  margin: -2px 0 8px 33px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--vscode-textLink-foreground);
+  font-size: 12px;
+  cursor: pointer;
+}
+.side-more:hover { text-decoration: underline; }
+
+/* A prompt jumped to from the side panel flashes briefly. */
+.msg.user.flash .bubble { animation: flash 1.2s ease-out; }
+@keyframes flash { 0%, 30% { box-shadow: 0 0 0 2px var(--vscode-focusBorder); } 100% { box-shadow: 0 0 0 2px transparent; } }
+.msg.user { scroll-margin-top: 90px; }

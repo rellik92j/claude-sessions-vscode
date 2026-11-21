@@ -55,6 +55,8 @@ export type TranscriptPart =
       /** Most telling input field (description, command, path…) for a one-line summary. */
       hint?: string;
       input: string;
+      /** The input's short string fields (paths, commands, skill names…), for the insights sidebar. */
+      args?: Record<string, string>;
       /** For edit-style tools: the replaced and replacement text. */
       diff?: { before: string; after: string };
       result?: { text: string; isError: boolean };
@@ -403,6 +405,22 @@ export function toolHint(input: unknown): string | undefined {
   return undefined;
 }
 
+const MAX_ARG = 2000;
+
+/** The short top-level string fields of a tool's input; long ones (file contents, patches) are left out. */
+export function shortArgs(input: unknown): Record<string, string> | undefined {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return undefined;
+  }
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
+    if (typeof v === 'string' && v.length <= MAX_ARG) {
+      out[k] = v;
+    }
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 export function truncate(text: string, max = MAX_TOOL_TEXT): string {
   return text.length > max ? text.slice(0, max) + `\n… (${text.length - max} more characters)` : text;
 }
@@ -441,6 +459,7 @@ export function parseTranscript(text: string): TranscriptEntry[] {
             name: String(p.name ?? 'tool'),
             hint: toolHint(p.input),
             input: truncate(JSON.stringify(p.input ?? {}, null, 2)),
+            args: shortArgs(p.input),
             diff:
               typeof p.input?.old_string === 'string' && typeof p.input?.new_string === 'string'
                 ? { before: truncate(p.input.old_string), after: truncate(p.input.new_string) }
